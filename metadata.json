@@ -1,0 +1,6 @@
+{
+  "name": "Black Swan - Global Financial Risk Intelligence",
+  "description": "AI-powered 24/7 financial risk platform monitoring global events, market impact, sector & portfolio risk, and AI simulations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
