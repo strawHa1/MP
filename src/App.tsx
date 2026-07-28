@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
-import { LandingPage } from './components/pages/LandingPage';
 import { LoginPage } from './components/pages/LoginPage';
 import { DashboardPage } from './components/pages/DashboardPage';
 import { EventsPage } from './components/pages/EventsPage';
@@ -24,6 +23,8 @@ import { GlobalEvent, CompanyRisk, AlertItem } from './types';
 import { useLiveHeadlines, NEWS_POLL_INTERVAL_MS } from './lib/newsService';
 
 export function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [username, setUsername] = useState('');
   const [currentPath, setCurrentPath] = useState<string>('/dashboard');
   const [events, setEvents] = useState<GlobalEvent[]>(INITIAL_EVENTS);
   const [companies, setCompanies] = useState<CompanyRisk[]>(INITIAL_COMPANIES);
@@ -58,6 +59,18 @@ export function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleLogin = (name: string) => {
+    setUsername(name);
+    setIsAuthenticated(true);
+    setCurrentPath('/dashboard');
+  };
+
+  const handleLogout = () => {
+    setUsername('');
+    setIsAuthenticated(false);
+    setCurrentPath('/dashboard');
+  };
+
   // Extract query params e.g. /events?id=evt-1 or /companies?symbol=NVDA
   const [baseRoute, queryString] = currentPath.split('?');
   const queryParams = new URLSearchParams(queryString || '');
@@ -66,17 +79,8 @@ export function App() {
   const companySymbol = queryParams.get('symbol') || 'NVDA';
   const simulationScenario = queryParams.get('scenario') || '';
 
-  // Render Public Auth & Landing Pages
-  if (baseRoute === '/' || baseRoute === '') {
-    return <LandingPage onNavigate={navigate} events={events} />;
-  }
-
-  if (baseRoute === '/login') {
-    return <LoginPage onNavigate={navigate} mode="login" />;
-  }
-
-  if (baseRoute === '/signup') {
-    return <LoginPage onNavigate={navigate} mode="signup" />;
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   // Unread alerts count
@@ -90,7 +94,8 @@ export function App() {
         onNavigate={navigate}
         unreadAlertsCount={unreadAlertsCount}
         liveEventsCount={newsFeed?.count ?? liveEvents.length}
-        onLogout={() => navigate('/')}
+        userName={username}
+        onLogout={handleLogout}
       />
 
       {/* Main Terminal Area */}
@@ -188,7 +193,7 @@ export function App() {
           )}
 
           {baseRoute === '/profile' && (
-            <ProfilePage onNavigate={navigate} onLogout={() => navigate('/')} />
+            <ProfilePage onNavigate={navigate} onLogout={handleLogout} />
           )}
 
           {baseRoute === '/settings' && (

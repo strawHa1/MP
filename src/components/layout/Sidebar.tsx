@@ -8,11 +8,6 @@ import {
   FileSpreadsheet,
   Cpu,
   Briefcase,
-  Bell,
-  Bot,
-  Search,
-  User,
-  Settings,
   ShieldAlert,
   Flame,
   ChevronRight,
@@ -25,6 +20,7 @@ interface SidebarProps {
   onNavigate: (path: string) => void;
   unreadAlertsCount?: number;
   liveEventsCount?: number;
+  userName?: string;
   userPlan?: string;
   onLogout?: () => void;
 }
@@ -34,6 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNavigate,
   unreadAlertsCount = 3,
   liveEventsCount = 0,
+  userName = 'User',
   userPlan = 'Premium Plan',
   onLogout
 }) => {
@@ -46,12 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { label: 'AI Simulations', path: '/simulations', icon: FileSpreadsheet, highlight: true },
     { label: 'AI Reports', path: '/reports', icon: Globe2 },
     { label: 'Portfolio Risk', path: '/portfolio', icon: Briefcase },
-    { label: 'Alerts Center', path: '/alerts', icon: ShieldAlert, count: unreadAlertsCount },
-    { label: 'AI Assistant', path: '/chat', icon: Bot },
-    { label: 'Search', path: '/search', icon: Search },
-    { label: 'Notifications', path: '/notifications', icon: Bell },
-    { label: 'Profile', path: '/profile', icon: User },
-    { label: 'Settings', path: '/settings', icon: Settings }
+    { label: 'Alerts Center', path: '/alerts', icon: ShieldAlert, count: unreadAlertsCount }
   ];
 
   return (
@@ -127,19 +119,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Quick User Footer */}
       <div className="p-3 border-t border-slate-200 dark:border-[#232A3D] bg-slate-50/80 dark:bg-[#0A0E17]/60">
         <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-[#161B2C]/80 border border-slate-200 dark:border-[#232A3D] shadow-sm">
-          <div 
-            onClick={() => onNavigate('/profile')}
-            className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
-          >
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-500 to-blue-500 p-0.5 shrink-0">
               <img
                 src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256"
-                alt="John Doe"
+                alt={userName}
                 className="w-full h-full rounded-[6px] object-cover"
               />
             </div>
             <div className="truncate">
-              <div className="text-xs font-bold text-slate-900 dark:text-slate-200 truncate">John Doe</div>
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-200 truncate">{userName}</div>
               <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold truncate">{userPlan}</div>
             </div>
           </div>

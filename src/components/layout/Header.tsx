@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
   Bell,
-  Settings,
   ShieldAlert,
-  ExternalLink,
   Bot
 } from 'lucide-react';
 import { AlertItem } from '../../types';
@@ -119,24 +117,6 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </div>
-
-        {/* Settings Icon */}
-        <button
-          onClick={() => onNavigate('/settings')}
-          className="p-2 rounded-xl bg-slate-100 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-400 transition-all shadow-sm"
-          title="Platform Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
-
-        {/* Public Landing Link */}
-        <button
-          onClick={() => onNavigate('/')}
-          className="p-2 rounded-xl bg-slate-100 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500/30 transition-all shadow-sm"
-          title="Public Landing Page"
-        >
-          <ExternalLink className="w-4 h-4" />
-        </button>
       </div>
     </header>
   );
