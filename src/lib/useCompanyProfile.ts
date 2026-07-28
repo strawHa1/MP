@@ -13,7 +13,13 @@ export function useCompanyProfile(ticker: string, pollMs = 8_000) {
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (silent = false) => {
-    if (!ticker) return;
+    if (!ticker) {
+      setLoading(false);
+      setProfile(null);
+      setNotFound(false);
+      setError(null);
+      return;
+    }
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setNotFound(false);

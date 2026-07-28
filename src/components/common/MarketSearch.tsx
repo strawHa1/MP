@@ -73,6 +73,7 @@ export function getQuickAccessChips(max = 10): { ticker: string; name?: string }
 async function fetchSearch(q: string, page: number): Promise<{
   results: SearchResultItem[];
   hasMore: boolean;
+  total?: number;
   error?: string;
 }> {
   const res = await fetch(
@@ -81,7 +82,7 @@ async function fetchSearch(q: string, page: number): Promise<{
   );
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Search failed');
-  return { results: data.results || [], hasMore: data.hasMore, error: data.error };
+  return { results: data.results || [], hasMore: data.hasMore, total: data.total, error: data.error };
 }
 
 async function refreshQuotes(symbols: string[]): Promise<Record<string, SearchResultItem['quote']>> {
@@ -109,18 +110,6 @@ function getMarketStatus(): SearchResultItem['marketStatus'] {
   return 'Closed';
 }
 
-function chipsToResults(chips: { ticker: string; name?: string }[]): SearchResultItem[] {
-  return chips.map((c) => ({
-    symbol: c.ticker,
-    displaySymbol: c.ticker,
-    name: c.name || c.ticker,
-    exchange: 'US',
-    type: 'Common Stock',
-    marketStatus: getMarketStatus(),
-    quote: null
-  }));
-}
-
 interface MarketSearchProps {
   onSelect: (ticker: string, name?: string) => void;
   placeholder?: string;
@@ -146,53 +135,35 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const [pinned, setPinned] = useState<string[]>(getPinnedTickers());
   const [browseMode, setBrowseMode] = useState(false);
+  const [browseTotal, setBrowseTotal] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const symbolsKey = results.map((r) => r.displaySymbol).join(',');
 
-  const enrichWithQuotes = useCallback(async (items: SearchResultItem[]) => {
-    const symbols = items.map((r) => r.displaySymbol);
-    const quotes = await refreshQuotes(symbols);
-    return items.map((item) => {
-      const key = item.displaySymbol.toUpperCase().split('.')[0];
-      const q = quotes[key] || quotes[item.symbol.toUpperCase()];
-      return q ? { ...item, quote: q as SearchResultItem['quote'] } : item;
-    });
-  }, []);
-
-  const loadBrowse = useCallback(async () => {
+  const loadBrowse = useCallback(async (p = 1, append = false) => {
     setBrowseMode(true);
     setLoading(true);
     setError(null);
-    const chips = getQuickAccessChips(12);
-    if (chips.length === 0) {
-      try {
-        const res = await fetch('/api/watchlist?limit=12', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          const fromWl = (data.entries || []).slice(0, 12).map((e: { ticker: string; companyName: string }) => ({
-            ticker: e.ticker,
-            name: e.companyName
-          }));
-          chips.push(...fromWl);
-        }
-      } catch {
-        /* ignore */
-      }
+    try {
+      const data = await fetchSearch('', p);
+      if (data.error) setError(data.error);
+      setResults((prev) => (append ? [...prev, ...data.results] : data.results));
+      setHasMore(data.hasMore);
+      setBrowseTotal(data.total ?? 0);
+      setHighlightIdx(!append && data.results.length > 0 ? 0 : -1);
+    } catch (e: any) {
+      setError(e?.message || 'Unable to fetch live market data. Please try again.');
+      if (!append) setResults([]);
+    } finally {
+      setLoading(false);
     }
-    const base = chipsToResults(chips);
-    const enriched = await enrichWithQuotes(base);
-    setResults(enriched);
-    setHasMore(false);
-    setHighlightIdx(enriched.length > 0 ? 0 : -1);
-    setLoading(false);
-  }, [enrichWithQuotes]);
+  }, []);
 
   const loadSearch = useCallback(async (q: string, p: number, append = false) => {
     if (!q.trim()) {
-      loadBrowse();
+      loadBrowse(p, append);
       return;
     }
     setBrowseMode(false);
@@ -203,6 +174,7 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
       if (data.error) setError(data.error);
       setResults((prev) => (append ? [...prev, ...data.results] : data.results));
       setHasMore(data.hasMore);
+      if (data.total != null) setBrowseTotal(data.total);
       setHighlightIdx(!append && data.results.length > 0 ? 0 : -1);
     } catch (e: any) {
       setError(e?.message || 'Unable to fetch live market data. Please try again.');
@@ -219,7 +191,7 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
       setPage(1);
       if (open) {
         if (query.trim()) loadSearch(query, 1, false);
-        else loadBrowse();
+        else loadBrowse(1, false);
       }
     }, query.trim() ? DEBOUNCE_MS : 0);
     return () => clearTimeout(timer);
@@ -256,8 +228,8 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
   }, []);
 
   const handleSelect = (item: SearchResultItem) => {
-    const ticker = item.displaySymbol.toUpperCase().split('.')[0];
-    addRecentSearch(ticker, item.name);
+    const ticker = item.displaySymbol.toUpperCase();
+    addRecentSearch(ticker.split('.')[0], item.name);
     onSelect(ticker, item.name);
     setQuery('');
     setOpen(false);
@@ -287,11 +259,12 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
 
   const handleScroll = () => {
     const el = listRef.current;
-    if (!el || loading || !hasMore || browseMode) return;
+    if (!el || loading || !hasMore) return;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
       const next = page + 1;
       setPage(next);
-      loadSearch(query, next, true);
+      if (browseMode || !query.trim()) loadBrowse(next, true);
+      else loadSearch(query, next, true);
     }
   };
 
@@ -305,7 +278,7 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
         type="text"
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => { setOpen(true); if (!query.trim()) loadBrowse(); }}
+        onFocus={() => { setOpen(true); if (!query.trim()) loadBrowse(1, false); }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className={
@@ -324,8 +297,18 @@ export const MarketSearch: React.FC<MarketSearchProps> = ({
         <div className={`absolute z-[100] mt-1.5 ${dropdownWidth} bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] rounded-xl shadow-2xl overflow-hidden`}>
           <div ref={listRef} onScroll={handleScroll} className="max-h-[min(420px,70vh)] overflow-y-auto custom-scrollbar">
             {browseMode && results.length > 0 && (
-              <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b border-slate-100 dark:border-[#232A3D]/40">
-                <Clock className="w-3 h-3" /> Recent & Pinned
+              <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between gap-1.5 border-b border-slate-100 dark:border-[#232A3D]/40">
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" />
+                  {browseTotal > 0 ? `${browseTotal.toLocaleString()} companies` : 'All market stocks'}
+                </span>
+                <span className="text-slate-400 font-normal normal-case">Scroll for more</span>
+              </div>
+            )}
+
+            {!browseMode && query.trim() && results.length > 0 && browseTotal > 0 && (
+              <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100 dark:border-[#232A3D]/40">
+                {browseTotal.toLocaleString()} matches — type to narrow results
               </div>
             )}
 

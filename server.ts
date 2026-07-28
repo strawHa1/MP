@@ -21,7 +21,7 @@ import {
   fetchQuote,
   fetchQuotesBatch
 } from './marketDataService.js';
-import { searchMarketSymbols, refreshSearchQuotes } from './searchService.js';
+import { searchMarketSymbols, refreshSearchQuotes, initSearchUniverse } from './searchService.js';
 
 dotenv.config();
 
@@ -494,6 +494,7 @@ async function startServer() {
     initImpactService();
     startImpactCron();
     startImpactPricePolling(30_000);
+    initSearchUniverse();
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {

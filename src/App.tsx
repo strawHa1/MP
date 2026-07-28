@@ -76,7 +76,7 @@ export function App() {
   const queryParams = new URLSearchParams(queryString || '');
 
   const eventId = queryParams.get('id') || '';
-  const companySymbol = queryParams.get('symbol') || 'NVDA';
+  const companySymbol = queryParams.get('symbol') || '';
   const simulationScenario = queryParams.get('scenario') || '';
 
   if (!isAuthenticated) {

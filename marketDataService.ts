@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { getCachedQuote, setCachedQuote, CachedQuote } from './quoteCache.js';
 import { getImpactState } from './impactService.js';
+import { fetchYahooQuote } from './yahooFinance.js';
 
 export interface WatchlistEntry {
   ticker: string;
@@ -167,11 +168,15 @@ export async function fetchQuote(symbol: string): Promise<CachedQuote | null> {
         }
       }
     } catch {
-      /* fall through */
+      /* try yahoo */
     }
-    return null;
   }
-  return simulatedQuote(sym);
+
+  const yahoo = await fetchYahooQuote(sym);
+  if (yahoo) return yahoo;
+
+  if (!finnhubKey) return simulatedQuote(sym);
+  return null;
 }
 
 export async function fetchQuotesBatch(symbols: string[]): Promise<Record<string, CachedQuote>> {
@@ -299,8 +304,9 @@ function buildRiskTrend(baseScore: number): { date: string; score: number }[] {
 }
 
 export async function getCompanyProfile(ticker: string): Promise<CompanyProfileResponse | null> {
-  const sym = ticker.toUpperCase().trim().split('.')[0];
-  const watchEntry = getWatchlistEntry(sym);
+  const sym = ticker.toUpperCase().trim();
+  const baseSym = sym.split('.')[0];
+  const watchEntry = getWatchlistEntry(baseSym);
 
   const [quote, finnhub] = await Promise.all([fetchQuote(sym), fetchFinnhubProfile(sym)]);
 
@@ -310,9 +316,9 @@ export async function getCompanyProfile(ticker: string): Promise<CompanyProfileR
   const sector = finnhub?.finnhubIndustry || watchEntry?.sector || 'Unknown';
   const country = finnhub?.country || watchEntry?.country || 'Unknown';
   const region = watchEntry?.region || mapCountryToRegion(country);
-  const exchange = finnhub?.exchange || watchEntry?.exchange || 'US';
+  const exchange = finnhub?.exchange || watchEntry?.exchange || (sym.includes('.NS') ? 'NSE' : sym.includes('.BO') ? 'BSE' : 'US');
 
-  const impacts = getImpactState().impactedCompanies.filter((r) => r.ticker === sym);
+  const impacts = getImpactState().impactedCompanies.filter((r) => r.ticker === baseSym || r.ticker === sym);
   const meta = { sector, country, ticker: sym };
   const riskScore = computeRiskScoreForMeta(meta, quote, impacts.length);
   const sentiment = sentimentFromQuote(quote?.percentChange ?? 0);
