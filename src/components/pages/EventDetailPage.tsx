@@ -14,6 +14,7 @@ import {
 import { GlobalEvent, CompanyRisk } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { LiveStockPrice } from '../common/LiveStockPrice';
+import { useLiveHeadlines, NEWS_POLL_INTERVAL_MS } from '../../lib/newsService';
 
 interface EventDetailPageProps {
   eventId: string;
@@ -30,6 +31,18 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
 }) => {
   const event = events.find((e) => e.id === eventId) || events[0];
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'impact' | 'news' | 'similar'>('overview');
+
+  const { feed: newsFeed, loading: newsLoading } = useLiveHeadlines('all', NEWS_POLL_INTERVAL_MS, 30);
+
+  const relatedNews = (newsFeed?.articles || []).filter((article) => {
+    const eventWords = event.title.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+    const text = `${article.title} ${article.description}`.toLowerCase();
+    return eventWords.some((word) => text.includes(word)) ||
+      (event.region === 'South Asia' && article.region === 'india') ||
+      (event.region === 'Global' && article.region === 'world');
+  }).slice(0, 8);
+
+  const displayNews = relatedNews.length > 0 ? relatedNews : (newsFeed?.articles || []).slice(0, 6);
 
   const affectedCompanies = companies.filter((c) => event.affectedCompanyTickers.includes(c.ticker));
 
@@ -238,10 +251,62 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
         </div>
       )}
 
-      {/* Tab 4 & 5 Placeholders */}
-      {(activeTab === 'news' || activeTab === 'similar') && (
+      {/* Tab 4: Live News | Tab 5 Placeholder */}
+      {activeTab === 'news' && (
+        <div className="bg-[#0F1420] border border-[#232A3D] p-6 rounded-2xl space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Newspaper className="w-4 h-4 text-blue-400" />
+              Live India & World News Feed
+            </h3>
+            {newsFeed?.lastUpdated && (
+              <span className="text-[10px] text-emerald-400 font-mono">
+                Updated {new Date(newsFeed.lastUpdated).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          {newsLoading && displayNews.length === 0 ? (
+            <div className="text-center text-slate-400 text-xs py-8">Loading live news...</div>
+          ) : (
+            <div className="space-y-3">
+              {displayNews.map((article) => (
+                <a
+                  key={article.id}
+                  href={article.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block p-4 rounded-xl bg-[#161B2C] border border-[#232A3D] hover:border-blue-500/50 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[10px] font-bold text-blue-400 uppercase">{article.source}</span>
+                    <span className="text-[10px] text-slate-500 font-mono">{article.timeAgo}</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-200">{article.title}</h4>
+                  <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{article.description}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
+                      article.region === 'india' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {article.region === 'india' ? 'India' : 'World'}
+                    </span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
+                      article.sentiment === 'negative' ? 'bg-red-500/20 text-red-400' :
+                      article.sentiment === 'positive' ? 'bg-emerald-500/20 text-emerald-400' :
+                      'bg-slate-500/20 text-slate-400'
+                    }`}>
+                      {article.sentiment}
+                    </span>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'similar' && (
         <div className="bg-[#0F1420] border border-[#232A3D] p-8 rounded-2xl text-center text-slate-400 text-xs">
-          Loading intelligence feed archives and historical analogue comparisons...
+          Loading historical analogue comparisons...
         </div>
       )}
     </div>

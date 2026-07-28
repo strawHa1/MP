@@ -106,6 +106,9 @@ export const EventsPage: React.FC<EventsPageProps> = ({ onNavigate, events }) =>
               <div className="space-y-2 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <SeverityBadge severity={evt.severity} size="sm" />
+                  {evt.isLive && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 uppercase">Live News</span>
+                  )}
                   <span className="text-xs font-mono font-bold text-slate-400 bg-[#161B2C] border border-[#232A3D] px-2 py-0.5 rounded">
                     {evt.category}
                   </span>

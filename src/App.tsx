@@ -21,12 +21,23 @@ import { SettingsPage } from './components/pages/SettingsPage';
 
 import { INITIAL_EVENTS, INITIAL_COMPANIES, INITIAL_ALERTS } from './data/mockData';
 import { GlobalEvent, CompanyRisk, AlertItem } from './types';
+import { useLiveHeadlines, NEWS_POLL_INTERVAL_MS } from './lib/newsService';
 
 export function App() {
   const [currentPath, setCurrentPath] = useState<string>('/dashboard');
   const [events, setEvents] = useState<GlobalEvent[]>(INITIAL_EVENTS);
   const [companies, setCompanies] = useState<CompanyRisk[]>(INITIAL_COMPANIES);
   const [alerts, setAlerts] = useState<AlertItem[]>(INITIAL_ALERTS);
+
+  const { liveEvents, feed: newsFeed } = useLiveHeadlines('all', NEWS_POLL_INTERVAL_MS, 25);
+
+  // Merge live API news with seeded events; live headlines appear first
+  useEffect(() => {
+    if (liveEvents.length === 0) return;
+    const liveIds = new Set(liveEvents.map((e) => e.id));
+    const staticEvents = INITIAL_EVENTS.filter((e) => !liveIds.has(e.id));
+    setEvents([...liveEvents, ...staticEvents]);
+  }, [liveEvents]);
 
   // App-wide risk tolerance & theme settings
   const [userRiskTolerance, setUserRiskTolerance] = useState<number>(55);
@@ -78,6 +89,7 @@ export function App() {
         currentPath={baseRoute}
         onNavigate={navigate}
         unreadAlertsCount={unreadAlertsCount}
+        liveEventsCount={newsFeed?.count ?? liveEvents.length}
         onLogout={() => navigate('/')}
       />
 
@@ -97,6 +109,7 @@ export function App() {
               onNavigate={navigate}
               events={events}
               companies={companies}
+              newsLastUpdated={newsFeed?.lastUpdated}
             />
           )}
 
@@ -124,7 +137,7 @@ export function App() {
           )}
 
           {baseRoute === '/sectors' && (
-            <SectorExplorerPage onNavigate={navigate} companies={companies} />
+            <SectorExplorerPage onNavigate={navigate} />
           )}
 
           {baseRoute === '/map' && (

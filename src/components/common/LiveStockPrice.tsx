@@ -15,18 +15,18 @@ export const LiveStockPrice: React.FC<LiveStockPriceProps> = ({
   showDetails = true,
   className = ''
 }) => {
-  const { quote, loading, refresh } = useLiveQuote(symbol, 15000);
+  const { quote, loading, refreshing, secondsAgo, refresh } = useLiveQuote(symbol, 8000);
 
   if (loading && !quote) {
     return (
-      <div className={`animate-pulse flex items-center gap-2 ${className}`}>
-        <div className="h-5 w-16 bg-slate-800 rounded"></div>
-        <div className="h-4 w-12 bg-slate-800/80 rounded"></div>
+      <div className={`animate-pulse flex flex-col gap-2 ${className}`}>
+        <div className="h-6 w-24 bg-slate-700/60 rounded" />
+        <div className="h-4 w-32 bg-slate-700/40 rounded" />
       </div>
     );
   }
 
-  if (!quote) return <span className="text-slate-500 text-xs">--</span>;
+  if (!quote) return <span className="text-slate-500 text-xs">No data available</span>;
 
   const isPositive = quote.change >= 0;
   const colorClass = isPositive ? 'text-emerald-400' : 'text-red-400';
@@ -63,12 +63,15 @@ export const LiveStockPrice: React.FC<LiveStockPriceProps> = ({
           </span>
           <span>•</span>
           <span className="text-slate-400">as of {quote.lastUpdated}</span>
+          {secondsAgo !== null && (
+            <span className="text-slate-500">({secondsAgo}s ago)</span>
+          )}
           <button
             onClick={() => refresh()}
             title="Refresh live quote"
             className="text-slate-500 hover:text-slate-300 transition-colors ml-1"
           >
-            <RefreshCw className="w-3 h-3" />
+            <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin text-blue-400' : ''}`} />
           </button>
         </div>
       )}

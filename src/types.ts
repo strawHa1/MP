@@ -9,8 +9,59 @@ export interface StockQuote {
   low: number;
   previousClose: number;
   volume: number;
-  lastUpdated: string; // ISO string or formatted time
+  lastUpdated: string;
   isMarketOpen: boolean;
+}
+
+export interface WatchlistEntry {
+  ticker: string;
+  companyName: string;
+  sector: string;
+  exchange: string;
+  country: string;
+  region: string;
+}
+
+export interface CompanyProfile extends CompanyRisk {
+  exchange: string;
+  region: string;
+  quote: StockQuote | null;
+  activeImpactCount: number;
+  inWatchlist: boolean;
+}
+
+export interface SectorLiveData {
+  id: string;
+  name: string;
+  description: string;
+  tickers: string[];
+  keyRisks: string[];
+  aiInsight: string;
+  riskScore: number;
+  marketImpact: string;
+  companyCount: number;
+  constituents: {
+    ticker: string;
+    name: string;
+    exchange: string;
+    riskScore: number;
+    quote: StockQuote | null;
+  }[];
+  lastUpdated: string;
+}
+
+export interface LiveCountryRisk {
+  id: string;
+  name: string;
+  isoCode: string;
+  flag: string;
+  region: string;
+  riskScore: number;
+  riskLevel: string;
+  eventsCount: number;
+  keyRisks: string[];
+  scoreChanged?: boolean;
+  previousScore?: number;
 }
 
 export interface GlobalEvent {
@@ -27,6 +78,73 @@ export interface GlobalEvent {
   affectedCompanyTickers: string[];
   marketImpactSummary: string;
   timeline?: { date: string; title: string; detail: string }[];
+  url?: string;
+  isLive?: boolean;
+}
+
+export interface NewsArticle {
+  id: string;
+  title: string;
+  description: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+  timeAgo: string;
+  region: 'india' | 'world';
+  sentiment: 'negative' | 'neutral' | 'positive';
+  imageUrl?: string;
+}
+
+export interface NewsFeedResponse {
+  articles: NewsArticle[];
+  source: string;
+  lastUpdated: string;
+  count: number;
+}
+
+export type ImpactSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
+
+export interface StockImpactRecord {
+  id: string;
+  ticker: string;
+  companyName: string;
+  sector: string;
+  country: string;
+  region: string;
+  headline: string;
+  description: string;
+  source: string;
+  publishedAt: string;
+  timeAgo: string;
+  url: string;
+  sentiment: ImpactSentiment;
+  severity: ImpactSeverity;
+  projectedImpactPct: { min: number; max: number };
+  projectedImpactLabel: string;
+  actualChangePct: number;
+  currentPrice: number;
+  volume: number;
+  newsType: 'macro' | 'company';
+}
+
+export interface ImpactStoreState {
+  impactedCompanies: StockImpactRecord[];
+  lastUpdated: string | null;
+  isLoading: boolean;
+  error: string | null;
+  source: string;
+}
+
+export interface SearchResultItem {
+  symbol: string;
+  displaySymbol: string;
+  name: string;
+  exchange: string;
+  type: string;
+  logoUrl?: string;
+  quote?: StockQuote | null;
+  marketStatus: 'LIVE' | 'Closed' | 'Premarket' | 'After Hours';
 }
 
 export interface CompanyRisk {

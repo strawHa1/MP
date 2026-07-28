@@ -1,0 +1,16 @@
+[
+  { "id": "cnt-tw", "name": "Taiwan", "isoCode": "TW", "flag": "🇹🇼", "region": "East Asia", "keywords": ["taiwan", "tsmc", "taipei", "strait"] },
+  { "id": "cnt-ua", "name": "Ukraine", "isoCode": "UA", "flag": "🇺🇦", "region": "Eastern Europe", "keywords": ["ukraine", "kyiv", "black sea", "zelensky"] },
+  { "id": "cnt-il", "name": "Israel", "isoCode": "IL", "flag": "🇮🇱", "region": "Middle East", "keywords": ["israel", "gaza", "tel aviv", "haifa"] },
+  { "id": "cnt-om", "name": "Oman / Strait of Hormuz", "isoCode": "OM", "flag": "🇴🇲", "region": "Middle East", "keywords": ["hormuz", "oman", "persian gulf", "tanker"] },
+  { "id": "cnt-ir", "name": "Iran", "isoCode": "IR", "flag": "🇮🇷", "region": "Middle East", "keywords": ["iran", "tehran", "sanctions iran"] },
+  { "id": "cnt-sa", "name": "Saudi Arabia", "isoCode": "SA", "flag": "🇸🇦", "region": "Middle East", "keywords": ["saudi", "aramco", "riyadh", "opec"] },
+  { "id": "cnt-cn", "name": "China", "isoCode": "CN", "flag": "🇨🇳", "region": "East Asia", "keywords": ["china", "beijing", "chinese", "shanghai"] },
+  { "id": "cnt-in", "name": "India", "isoCode": "IN", "flag": "🇮🇳", "region": "South Asia", "keywords": ["india", "mumbai", "delhi", "indian"] },
+  { "id": "cnt-de", "name": "Germany", "isoCode": "DE", "flag": "🇩🇪", "region": "Western Europe", "keywords": ["germany", "german", "berlin", "frankfurt"] },
+  { "id": "cnt-gb", "name": "United Kingdom", "isoCode": "GB", "flag": "🇬🇧", "region": "Western Europe", "keywords": ["uk", "britain", "london", "england"] },
+  { "id": "cnt-us", "name": "United States", "isoCode": "US", "flag": "🇺🇸", "region": "North America", "keywords": ["united states", "america", "washington", "fed ", "u.s."] },
+  { "id": "cnt-jp", "name": "Japan", "isoCode": "JP", "flag": "🇯🇵", "region": "East Asia", "keywords": ["japan", "tokyo", "japanese", "boj"] },
+  { "id": "cnt-kr", "name": "South Korea", "isoCode": "KR", "flag": "🇰🇷", "region": "East Asia", "keywords": ["korea", "seoul", "korean", "samsung"] },
+  { "id": "cnt-ru", "name": "Russia", "isoCode": "RU", "flag": "🇷🇺", "region": "Eastern Europe", "keywords": ["russia", "moscow", "putin", "kremlin"] }
+]

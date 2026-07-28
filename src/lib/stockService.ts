@@ -88,22 +88,28 @@ export async function fetchMultipleStockQuotes(symbols: string[]): Promise<Recor
 export function useLiveQuote(symbol: string, pollIntervalMs: number = 15000) {
   const [quote, setQuote] = useState<StockQuote | null>(quoteCache[symbol.toUpperCase()]?.quote || null);
   const [loading, setLoading] = useState<boolean>(!quote);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastFetched, setLastFetched] = useState<number | null>(quoteCache[symbol.toUpperCase()]?.timestamp || null);
   const isMounted = useRef(true);
 
-  const loadQuote = useCallback(async () => {
+  const loadQuote = useCallback(async (silent = false) => {
     if (!symbol) return;
+    if (silent) setRefreshing(true);
     try {
       const data = await fetchStockQuote(symbol);
       if (isMounted.current) {
         setQuote(data);
         setLoading(false);
+        setRefreshing(false);
         setError(null);
+        setLastFetched(Date.now());
       }
     } catch (e: any) {
       if (isMounted.current) {
         setError(e?.message || 'Failed to fetch quote');
         setLoading(false);
+        setRefreshing(false);
       }
     }
   }, [symbol]);
@@ -113,7 +119,7 @@ export function useLiveQuote(symbol: string, pollIntervalMs: number = 15000) {
     loadQuote();
 
     const timer = setInterval(() => {
-      loadQuote();
+      loadQuote(true);
     }, pollIntervalMs);
 
     return () => {
@@ -122,7 +128,9 @@ export function useLiveQuote(symbol: string, pollIntervalMs: number = 15000) {
     };
   }, [loadQuote, pollIntervalMs]);
 
-  return { quote, loading, error, refresh: loadQuote };
+  const secondsAgo = lastFetched ? Math.floor((Date.now() - lastFetched) / 1000) : null;
+
+  return { quote, loading, refreshing, error, secondsAgo, refresh: () => loadQuote(true) };
 }
 
 /**

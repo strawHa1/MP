@@ -17,11 +17,13 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'rec
 import { GlobalEvent, CompanyRisk, RiskSeverity } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { RiskGauge } from '../common/RiskGauge';
+import { ImpactOnStocksSection } from '../dashboard/ImpactOnStocksSection';
 
 interface DashboardPageProps {
   onNavigate: (path: string) => void;
   events: GlobalEvent[];
   companies: CompanyRisk[];
+  newsLastUpdated?: string;
 }
 
 const TREND_30_DAYS = [
@@ -34,7 +36,7 @@ const TREND_30_DAYS = [
   { day: 'Jul 22', score: 72 }
 ];
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events, companies }) => {
+export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events, companies, newsLastUpdated }) => {
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
       {/* Top Welcome / Header Status Bar */}
@@ -229,6 +231,51 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
         </div>
       </div>
 
+      {/* Global Events Feed */}
+      <div className="bg-[#0F1420] border border-[#232A3D] p-6 rounded-2xl shadow-xl space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#232A3D]">
+          <div>
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-amber-400" />
+              Global Events
+            </h3>
+            {newsLastUpdated && (
+              <p className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                Live India & World news • Updated {new Date(newsLastUpdated).toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+          <button onClick={() => onNavigate('/events')} className="text-xs text-blue-400 hover:underline font-semibold">
+            View All
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {events.slice(0, 3).map((evt) => (
+            <div
+              key={evt.id}
+              onClick={() => onNavigate(`/events?id=${evt.id}`)}
+              className="p-4 rounded-xl bg-[#161B2C] hover:bg-slate-800/80 border border-[#232A3D] cursor-pointer transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <SeverityBadge severity={evt.severity} size="sm" />
+                  {evt.isLive && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 uppercase">Live</span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">{evt.reportedAt}</span>
+              </div>
+              <h4 className="text-xs font-bold text-slate-200 mt-2 line-clamp-2">{evt.title}</h4>
+              <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{evt.region} • Impact Score: {evt.impactScore}/100</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Impact on Stocks — news-to-price correlation */}
+      <ImpactOnStocksSection onNavigate={onNavigate} />
+
       {/* World Map Heatmap Preview Row */}
       <div 
         onClick={() => onNavigate('/map')}
@@ -261,35 +308,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
         </div>
       </div>
 
-      {/* Bottom Row: Recent Events, AI Insights, Recommended Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Events List */}
-        <div className="bg-[#0F1420] border border-[#232A3D] p-6 rounded-2xl shadow-xl space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#232A3D]">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Recent Events Feed</h3>
-            <button onClick={() => onNavigate('/events')} className="text-xs text-blue-400 hover:underline font-semibold">
-              View All
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {events.slice(0, 3).map((evt) => (
-              <div
-                key={evt.id}
-                onClick={() => onNavigate(`/events?id=${evt.id}`)}
-                className="p-3 rounded-xl bg-[#161B2C] hover:bg-slate-800/80 border border-[#232A3D] cursor-pointer transition-colors"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <SeverityBadge severity={evt.severity} size="sm" />
-                  <span className="text-[10px] text-slate-400 font-mono">{evt.reportedAt}</span>
-                </div>
-                <h4 className="text-xs font-bold text-slate-200 mt-2 line-clamp-1">{evt.title}</h4>
-                <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{evt.region} • Impact Score: {evt.impactScore}/100</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
+      {/* Bottom Row: AI Insights, Recommended Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* AI Insights Card */}
         <div className="bg-[#0F1420] border border-[#232A3D] p-6 rounded-2xl shadow-xl space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-[#232A3D]">

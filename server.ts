@@ -1,7 +1,27 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
+import { fetchHeadlines, fetchCompanyNews } from './newsApi.js';
+import {
+  getImpactState,
+  refreshImpactData,
+  manualRefreshImpact,
+  initImpactService,
+  startImpactCron,
+  startImpactPricePolling
+} from './impactService.js';
+import {
+  getWatchlist,
+  searchWatchlist,
+  getCompanyProfile,
+  getSectorsConfig,
+  getSectorLiveData,
+  getLiveCountryRiskCached,
+  fetchQuote,
+  fetchQuotesBatch
+} from './marketDataService.js';
+import { searchMarketSymbols, refreshSearchQuotes } from './searchService.js';
 
 dotenv.config();
 
@@ -74,106 +94,103 @@ function getFormattedTimestamp(): string {
  * Tries Finnhub API first if API key is provided, or returns realistic live-ticking price quotes
  */
 app.get('/api/stocks/quote', async (req, res) => {
-  const symbol = ((req.query.symbol as string) || 'NVDA').toUpperCase().trim();
-  const finnhubKey = process.env.FINNHUB_API_KEY;
-
-  if (finnhubKey) {
-    try {
-      const response = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${finnhubKey}`, {
-        headers: { 'Accept': 'application/json' }
-      });
-      if (response.ok) {
-        const data: any = await response.json();
-        if (data && typeof data.c === 'number' && data.c > 0) {
-          const currentPrice = data.c;
-          const prevClose = data.pc || currentPrice;
-          const change = currentPrice - prevClose;
-          const percentChange = prevClose > 0 ? (change / prevClose) * 100 : 0;
-          const marketOpen = isUSMarketOpen();
-
-          return res.json({
-            symbol,
-            price: Number(currentPrice.toFixed(2)),
-            change: Number(change.toFixed(2)),
-            percentChange: Number(percentChange.toFixed(2)),
-            high: Number((data.h || currentPrice).toFixed(2)),
-            low: Number((data.l || currentPrice).toFixed(2)),
-            previousClose: Number(prevClose.toFixed(2)),
-            volume: data.v || 18450000,
-            lastUpdated: getFormattedTimestamp(),
-            isMarketOpen: marketOpen
-          });
-        }
-      }
-    } catch (e) {
-      console.warn(`Finnhub fetch error for ${symbol}, switching to primary live price feed:`, e);
+  try {
+    const symbol = ((req.query.symbol as string) || 'NVDA').toUpperCase().trim();
+    const quote = await fetchQuote(symbol);
+    if (!quote) {
+      return res.status(404).json({ error: 'Quote not available for symbol' });
     }
+    res.set('Cache-Control', 'no-store');
+    res.json(quote);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Quote fetch failed' });
   }
-
-  // Live real-time pricing engine with micro-fluctuations (simulating live tick feed)
-  const baseline = STOCK_BASELINES[symbol] || {
-    name: `${symbol} Corp`,
-    price: 150.00,
-    prevClose: 148.50
-  };
-
-  // Generate deterministic but realistic micro-movement per minute
-  const nowMins = Math.floor(Date.now() / 15000); // changes slightly every 15s
-  const seed = (symbol.charCodeAt(0) * 13 + symbol.charCodeAt(1 || 0) * 7 + nowMins) % 100;
-  const jitterPct = (seed - 50) / 1000; // -0.05% to +0.05% jitter
-  const livePrice = Number((baseline.price * (1 + jitterPct)).toFixed(2));
-  const change = Number((livePrice - baseline.prevClose).toFixed(2));
-  const percentChange = Number(((change / baseline.prevClose) * 100).toFixed(2));
-  const marketOpen = isUSMarketOpen();
-
-  return res.json({
-    symbol,
-    price: livePrice,
-    change,
-    percentChange,
-    high: Number((Math.max(livePrice, baseline.prevClose) * 1.012).toFixed(2)),
-    low: Number((Math.min(livePrice, baseline.prevClose) * 0.988).toFixed(2)),
-    previousClose: baseline.prevClose,
-    volume: 24500000 + (seed * 100000),
-    lastUpdated: getFormattedTimestamp(),
-    isMarketOpen: marketOpen
-  });
 });
 
 /**
- * Batch Stock Quotes Endpoint
+ * Batch Stock Quotes Endpoint (cached, parallel Finnhub)
  */
 app.get('/api/stocks/quotes', async (req, res) => {
-  const symbolsRaw = (req.query.symbols as string) || 'NVDA,AAPL,TSM,XOM,LMT';
-  const symbols = symbolsRaw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-  
-  const results: Record<string, any> = {};
-  
-  // Execute quotes
-  for (const sym of symbols) {
-    const baseline = STOCK_BASELINES[sym] || { name: sym, price: 150.00, prevClose: 148.50 };
-    const nowMins = Math.floor(Date.now() / 15000);
-    const seed = (sym.charCodeAt(0) * 13 + sym.charCodeAt(1 || 0) * 7 + nowMins) % 100;
-    const jitterPct = (seed - 50) / 1000;
-    const livePrice = Number((baseline.price * (1 + jitterPct)).toFixed(2));
-    const change = Number((livePrice - baseline.prevClose).toFixed(2));
-    const percentChange = Number(((change / baseline.prevClose) * 100).toFixed(2));
-
-    results[sym] = {
-      symbol: sym,
-      price: livePrice,
-      change,
-      percentChange,
-      high: Number((Math.max(livePrice, baseline.prevClose) * 1.01).toFixed(2)),
-      low: Number((Math.min(livePrice, baseline.prevClose) * 0.99).toFixed(2)),
-      previousClose: baseline.prevClose,
-      volume: 15000000 + (seed * 80000),
-      lastUpdated: getFormattedTimestamp(),
-      isMarketOpen: isUSMarketOpen()
-    };
+  try {
+    const symbolsRaw = (req.query.symbols as string) || 'NVDA,AAPL,TSM,XOM,LMT';
+    const symbols = symbolsRaw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const results = await fetchQuotesBatch(symbols);
+    res.json(results);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Batch quote fetch failed' });
   }
+});
 
-  res.json(results);
+/** Universal live symbol search (Finnhub) */
+app.get('/api/search', async (req, res) => {
+  try {
+    const q = (req.query.q as string) || '';
+    const page = Math.max(1, parseInt((req.query.page as string) || '1', 10) || 1);
+    const limit = Math.min(parseInt((req.query.limit as string) || '20', 10) || 20, 50);
+    const data = await searchMarketSymbols(q, page, limit);
+    if (data.error) {
+      return res.status(503).json(data);
+    }
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Search failed', results: [], total: 0, hasMore: false });
+  }
+});
+
+/** Live quote refresh for search dropdown (never long-cached) */
+app.get('/api/search/quotes', async (req, res) => {
+  try {
+    const raw = (req.query.symbols as string) || '';
+    const symbols = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (symbols.length === 0) return res.json({});
+    const quotes = await refreshSearchQuotes(symbols);
+    res.set('Cache-Control', 'no-store');
+    res.json(quotes);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Quote refresh failed' });
+  }
+});
+
+/** Curated watchlist search */
+app.get('/api/watchlist', (req, res) => {
+  const q = (req.query.q as string) || '';
+  const limit = Math.min(parseInt((req.query.limit as string) || '20', 10) || 20, 50);
+  res.json({ entries: q ? searchWatchlist(q, limit) : getWatchlist(), count: getWatchlist().length });
+});
+
+/** Full company profile + live quote + risk score */
+app.get('/api/companies/:ticker', async (req, res) => {
+  try {
+    const profile = await getCompanyProfile(req.params.ticker);
+    if (!profile) {
+      return res.status(404).json({ error: 'Company not found', inWatchlist: false });
+    }
+    res.json(profile);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Failed to load company' });
+  }
+});
+
+/** All sectors config */
+app.get('/api/sectors', (_req, res) => {
+  res.json({ sectors: getSectorsConfig() });
+});
+
+/** Live sector data with constituent quotes */
+app.get('/api/sectors/:id', async (req, res) => {
+  try {
+    const data = await getSectorLiveData(req.params.id);
+    if (!data) return res.status(404).json({ error: 'Sector not found' });
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Failed to load sector' });
+  }
+});
+
+/** Live country risk scores from news/impact pipeline */
+app.get('/api/countries/risk', (req, res) => {
+  const force = req.query.refresh === 'true';
+  res.json(getLiveCountryRiskCached(force));
 });
 
 /**
@@ -392,6 +409,69 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+/**
+ * Live News Headlines — India & World
+ * Uses GNews / NewsAPI / Finnhub when keys are set, otherwise RSS feeds.
+ */
+app.get('/api/news/headlines', async (req, res) => {
+  try {
+    const region = ((req.query.region as string) || 'all').toLowerCase() as 'india' | 'world' | 'all';
+    const limit = Math.min(parseInt((req.query.limit as string) || '20', 10) || 20, 50);
+    const validRegion = ['india', 'world', 'all'].includes(region) ? region : 'all';
+    const { articles, source } = await fetchHeadlines(validRegion, limit);
+    res.json({
+      articles,
+      source,
+      region: validRegion,
+      lastUpdated: new Date().toISOString(),
+      count: articles.length
+    });
+  } catch (e: any) {
+    console.error('News headlines error:', e);
+    res.status(500).json({ error: 'Failed to fetch news headlines' });
+  }
+});
+
+/**
+ * Company-specific live news
+ */
+app.get('/api/news/company', async (req, res) => {
+  try {
+    const symbol = ((req.query.symbol as string) || 'NVDA').toUpperCase().trim();
+    const limit = Math.min(parseInt((req.query.limit as string) || '10', 10) || 10, 25);
+    const { articles, source } = await fetchCompanyNews(symbol, limit);
+    res.json({
+      articles,
+      source,
+      symbol,
+      lastUpdated: new Date().toISOString(),
+      count: articles.length
+    });
+  } catch (e: any) {
+    console.error('Company news error:', e);
+    res.status(500).json({ error: 'Failed to fetch company news' });
+  }
+});
+
+/**
+ * Stock Impact — news-to-price correlation pipeline
+ */
+app.get('/api/impact', (req, res) => {
+  res.json(getImpactState());
+});
+
+app.post('/api/impact/refresh', async (req, res) => {
+  try {
+    const result = await manualRefreshImpact();
+    if (!result.ok) {
+      return res.status(429).json({ error: result.message, ...result.state });
+    }
+    res.json(result.state);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Refresh failed' });
+  }
+});
+
 // Setup Vite or Static File Serving
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
@@ -409,8 +489,22 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Black Swan Server running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Black Swan Server running on http://localhost:${PORT}`);
+    initImpactService();
+    startImpactCron();
+    startImpactPricePolling(30_000);
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `\nError: Port ${PORT} is already in use.\n` +
+        `Stop the other server (Task Manager / kill node) or run: $env:PORT=3003; npm run dev\n`
+      );
+      process.exit(1);
+    }
+    throw err;
   });
 }
 

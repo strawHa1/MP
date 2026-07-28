@@ -1,0 +1,82 @@
+[
+  {
+    "id": "sec-semi",
+    "name": "Semiconductors & AI Hardware",
+    "description": "Hardware backbone of modern computing, cloud infrastructure, and AI models.",
+    "tickers": ["NVDA", "TSM", "ASML", "AMD", "INTC", "AVGO", "QCOM", "MU"],
+    "keyRisks": ["Taiwan Strait geopolitical escalation", "Export controls on advanced chips", "Rare earth supply concentration"],
+    "aiInsight": "Highest tail-risk exposure. Taiwan foundry disruption triggers cascade shutdowns across global sectors."
+  },
+  {
+    "id": "sec-tech",
+    "name": "Software & Cloud Services",
+    "description": "Enterprise SaaS, hyperscale cloud, and consumer technology platforms.",
+    "tickers": ["MSFT", "AMZN", "GOOGL", "META", "ORCL", "CRM", "NFLX", "AAPL"],
+    "keyRisks": ["Undersea cable sabotage", "Data sovereignty legislation", "Enterprise IT spending pullbacks"],
+    "aiInsight": "High margins offer buffer, but cable disruptions could segment global cloud regions."
+  },
+  {
+    "id": "sec-energy",
+    "name": "Energy, Oil & Gas",
+    "description": "Global extraction, refining, transport, and distribution of hydrocarbons.",
+    "tickers": ["XOM", "CVX", "SHEL", "BP", "COP"],
+    "keyRisks": ["Strait of Hormuz chokepoints", "OPEC+ production shifts", "Refining cyberattacks"],
+    "aiInsight": "Geopolitical risk premiums account for $12–$15 of current Brent crude baseline."
+  },
+  {
+    "id": "sec-defense",
+    "name": "Aerospace & Defense",
+    "description": "Defense equipment, military avionics, missile defense, and naval contractors.",
+    "tickers": ["LMT", "RTX", "NOC", "GD", "BA"],
+    "keyRisks": ["Defense supply chain lead times", "Procurement budget friction", "Specialized alloy sourcing"],
+    "aiInsight": "Inverse systemic hedge — heightened global risk drives multi-year defense commitments."
+  },
+  {
+    "id": "sec-finance",
+    "name": "Global Banking & Financials",
+    "description": "Tier-1 investment banks, payment networks, and clearing houses.",
+    "tickers": ["JPM", "GS", "BAC", "C", "MS"],
+    "keyRisks": ["Sovereign debt exposure", "SWIFT cyber threats", "Derivative margin liquidity crunches"],
+    "aiInsight": "Capital ratios strong, but cross-border contagion remains during currency shocks."
+  },
+  {
+    "id": "sec-healthcare",
+    "name": "Healthcare & Pharma",
+    "description": "Pharmaceuticals, biotech, and healthcare services globally.",
+    "tickers": ["JNJ", "PFE", "UNH", "LLY"],
+    "keyRisks": ["Drug supply chain disruptions", "Regulatory pricing pressure", "Pandemic preparedness gaps"],
+    "aiInsight": "Defensive sector with moderate geopolitical exposure except API sourcing from Asia."
+  },
+  {
+    "id": "sec-industrials",
+    "name": "Industrials & Manufacturing",
+    "description": "Heavy machinery, aerospace components, and industrial automation.",
+    "tickers": ["CAT", "GE", "HON", "DE", "BA"],
+    "keyRisks": ["Supply chain reshoring costs", "Raw material price volatility", "Trade tariff impacts"],
+    "aiInsight": "Cyclical exposure to global trade volumes and infrastructure spending."
+  },
+  {
+    "id": "sec-logistics",
+    "name": "Shipping & Logistics",
+    "description": "Freight, parcel delivery, and maritime shipping operators.",
+    "tickers": ["FDX", "UPS", "ZIM"],
+    "keyRisks": ["Red Sea / Hormuz route disruptions", "Fuel cost surges", "Port labor strikes"],
+    "aiInsight": "Directly exposed to maritime chokepoint events — watch Hormuz and Panama Canal."
+  },
+  {
+    "id": "sec-autos",
+    "name": "Automotive & EV",
+    "description": "Traditional automakers and electric vehicle manufacturers.",
+    "tickers": ["TSLA", "TM", "F", "GM"],
+    "keyRisks": ["Semiconductor shortages", "Battery raw material supply", "Trade policy shifts"],
+    "aiInsight": "Highly sensitive to chip supply and China/Taiwan manufacturing exposure."
+  },
+  {
+    "id": "sec-mining",
+    "name": "Mining & Critical Materials",
+    "description": "Rare earth, lithium, copper, and strategic mineral producers.",
+    "tickers": ["MP", "ALB", "FCX"],
+    "keyRisks": ["China export restrictions on rare earths", "Environmental regulation", "Commodity price swings"],
+    "aiInsight": "Critical to defense and EV supply chains — sanctions exposure is elevated."
+  }
+]

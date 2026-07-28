@@ -1,29 +1,24 @@
 import React, { useState } from 'react';
 import {
-  Search,
   Bell,
   Settings,
-  User,
   ShieldAlert,
-  Flame,
-  CheckCircle2,
   ExternalLink,
   Bot
 } from 'lucide-react';
 import { AlertItem } from '../../types';
+import { MarketSearch } from '../common/MarketSearch';
 
 interface HeaderProps {
   onNavigate: (path: string) => void;
   alerts?: AlertItem[];
   unreadCount?: number;
-  onSearchFocus?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   alerts = [],
-  unreadCount = 2,
-  onSearchFocus
+  unreadCount = 2
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -31,19 +26,12 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="h-16 bg-white/90 dark:bg-[#0F1420]/90 backdrop-blur border-b border-slate-200 dark:border-[#232A3D] px-6 flex items-center justify-between sticky top-0 z-20 shadow-sm transition-colors">
       {/* Search Input Bar */}
       <div className="flex items-center gap-4 flex-1 max-w-md">
-        <div 
-          onClick={() => {
-            if (onSearchFocus) onSearchFocus();
-            onNavigate('/search');
-          }}
-          className="w-full relative flex items-center bg-slate-100 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] rounded-xl px-3 py-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer hover:border-slate-400 dark:hover:border-slate-600 transition-colors shadow-inner"
-        >
-          <Search className="w-4 h-4 text-slate-400 mr-2.5 shrink-0" />
-          <span className="truncate">Search companies, events, sectors, ticker...</span>
-          <kbd className="ml-auto text-[10px] bg-white dark:bg-[#0A0E17] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-[#232A3D] px-1.5 py-0.5 rounded font-mono font-bold">
-            ⌘K
-          </kbd>
-        </div>
+        <MarketSearch
+          onSelect={(ticker) => onNavigate(`/companies?symbol=${ticker}`)}
+          placeholder="Search any company — Apple, AAPL, TSLA..."
+          className="w-full"
+          inputClassName="w-full bg-slate-100 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] rounded-xl px-3 py-2 pl-9 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+        />
       </div>
 
       {/* Right Action Icons & Tickers */}

@@ -24,6 +24,7 @@ interface SidebarProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   unreadAlertsCount?: number;
+  liveEventsCount?: number;
   userPlan?: string;
   onLogout?: () => void;
 }
@@ -32,12 +33,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentPath,
   onNavigate,
   unreadAlertsCount = 3,
+  liveEventsCount = 0,
   userPlan = 'Premium Plan',
   onLogout
 }) => {
   const navItems = [
     { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { label: 'Global Events', path: '/events', icon: Flame, badge: '12 Live' },
+    { label: 'Global Events', path: '/events', icon: Flame, badge: liveEventsCount > 0 ? `${liveEventsCount} Live` : 'Live' },
     { label: 'Company Explorer', path: '/companies', icon: Building2 },
     { label: 'Sector Explorer', path: '/sectors', icon: Cpu },
     { label: 'World Risk Map', path: '/map', icon: Map },
