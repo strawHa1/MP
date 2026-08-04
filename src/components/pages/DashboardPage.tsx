@@ -1,42 +1,69 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Activity,
   ShieldAlert,
   Building2,
   Bell,
   TrendingDown,
+  TrendingUp,
   Globe2,
   ArrowRight,
   Zap,
   CheckCircle2,
-  AlertTriangle,
-  ChevronRight,
-  Compass
+  Compass,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
-import { GlobalEvent, CompanyRisk, RiskSeverity } from '../../types';
+import { GlobalEvent, AlertItem } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { RiskGauge } from '../common/RiskGauge';
 import { ImpactOnStocksSection } from '../dashboard/ImpactOnStocksSection';
+import { RecommendedActionModal } from '../dashboard/RecommendedActionModal';
+import { useDashboardStats } from '../../lib/useDashboardStats';
+import { useDashboardIntelligence, RecommendedActionItem } from '../../lib/useDashboardIntelligence';
 
 interface DashboardPageProps {
   onNavigate: (path: string) => void;
   events: GlobalEvent[];
-  companies: CompanyRisk[];
+  alerts: AlertItem[];
   newsLastUpdated?: string;
 }
 
-const TREND_30_DAYS = [
-  { day: 'Jul 1', score: 58 },
-  { day: 'Jul 5', score: 61 },
-  { day: 'Jul 8', score: 64 },
-  { day: 'Jul 12', score: 60 },
-  { day: 'Jul 15', score: 68 },
-  { day: 'Jul 18', score: 70 },
-  { day: 'Jul 22', score: 72 }
-];
+export const DashboardPage: React.FC<DashboardPageProps> = ({
+  onNavigate,
+  events,
+  alerts,
+  newsLastUpdated
+}) => {
+  const { stats, loading, refreshing, error, refresh } = useDashboardStats(events, alerts);
+  const intelligence = useDashboardIntelligence();
+  const [selectedAction, setSelectedAction] = useState<RecommendedActionItem | null>(null);
+  const [actionConfirmed, setActionConfirmed] = useState<string | null>(null);
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events, companies, newsLastUpdated }) => {
+  const handleConfirmExecute = (action: RecommendedActionItem) => {
+    const log = JSON.parse(localStorage.getItem('bs-action-log') || '[]') as object[];
+    log.unshift({
+      id: action.id,
+      type: 'execute',
+      ticker: action.ticker,
+      title: action.title,
+      at: new Date().toISOString()
+    });
+    localStorage.setItem('bs-action-log', JSON.stringify(log.slice(0, 20)));
+    setActionConfirmed(action.id);
+    setTimeout(() => {
+      setSelectedAction(null);
+      setActionConfirmed(null);
+      onNavigate(`/portfolio?review=${action.ticker}&action=hedge`);
+    }, 1200);
+  };
+
+  const handleOpenPortfolioReview = (action: RecommendedActionItem) => {
+    setSelectedAction(null);
+    onNavigate(`/portfolio?review=${action.ticker}&action=rebalance`);
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
       {/* Top Welcome / Header Status Bar */}
@@ -52,6 +79,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
         </div>
 
         <div className="flex items-center gap-3">
+          {stats?.lastUpdated && (
+            <span className="text-[10px] text-emerald-400 font-mono hidden sm:block">
+              Updated {new Date(stats.lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            className="p-2 rounded-xl bg-[#161B2C] border border-[#232A3D] text-slate-400 hover:text-white disabled:opacity-50"
+            title="Refresh dashboard"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
           <button
             onClick={() => onNavigate('/simulations')}
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
@@ -61,6 +101,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </button>
         </div>
       </div>
+
+      {loading && !stats ? (
+        <div className="flex flex-col items-center py-24 text-slate-400">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-400 mb-3" />
+          <p className="text-xs">Loading live risk intelligence...</p>
+        </div>
+      ) : error && !stats ? (
+        <div className="bg-[#0F1420] border border-red-500/30 p-8 rounded-2xl text-center">
+          <p className="text-red-400 font-bold text-sm">{error}</p>
+          <button onClick={refresh} className="mt-2 text-xs text-blue-400 hover:underline">Retry</button>
+        </div>
+      ) : stats && (
+      <>
 
       {/* Top Row: 4 Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -76,14 +129,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold font-mono text-white">72</span>
+            <span className="text-3xl font-extrabold font-mono text-white">{stats.globalRiskScore}</span>
             <span className="text-xs text-slate-400">/ 100</span>
-            <SeverityBadge severity="high" size="sm" className="ml-auto" />
+            <SeverityBadge severity={stats.globalRiskSeverity} size="sm" className="ml-auto" />
           </div>
 
-          <div className="mt-3 flex items-center gap-1.5 text-xs text-red-400 font-semibold">
-            <TrendingDown className="w-3.5 h-3.5 rotate-180" />
-            <span>+4 pts from last week (Elevated)</span>
+          <div className={`mt-3 flex items-center gap-1.5 text-xs font-semibold ${stats.scoreDelta != null && stats.scoreDelta >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+            {stats.scoreDelta != null ? (
+              <>
+                {stats.scoreDelta >= 0 ? (
+                  <TrendingDown className="w-3.5 h-3.5 rotate-180" />
+                ) : (
+                  <TrendingUp className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {stats.scoreDelta >= 0 ? '+' : ''}{stats.scoreDelta} pts from prior snapshot
+                  {stats.globalRiskSeverity === 'critical' || stats.globalRiskSeverity === 'high' ? ' (Elevated)' : ''}
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-500">Building trend baseline...</span>
+            )}
           </div>
         </div>
 
@@ -99,14 +165,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold font-mono text-white">12</span>
-            <span className="text-xs font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full ml-auto">
-              +3 Today
-            </span>
+            <span className="text-3xl font-extrabold font-mono text-white">{stats.activeBlackSwans}</span>
+            {stats.liveEventsToday > 0 && (
+              <span className="text-xs font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full ml-auto">
+                +{stats.liveEventsToday} Live
+              </span>
+            )}
           </div>
 
           <div className="mt-3 text-xs text-slate-400 flex items-center justify-between">
-            <span>Critical Focus: Taiwan & Hormuz</span>
+            <span>Critical Focus: {stats.criticalFocus}</span>
             <button onClick={() => onNavigate('/events')} className="text-blue-400 font-semibold hover:underline">
               View Feed
             </button>
@@ -125,15 +193,30 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold font-mono text-white">248</span>
-            <span className="text-xs font-semibold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full ml-auto">
-              +18 Today
-            </span>
+            <span className="text-3xl font-extrabold font-mono text-white">{stats.companiesAtRisk}</span>
+            {stats.companiesAtRisk > 0 && (
+              <span className="text-xs font-semibold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full ml-auto">
+                Live impacts
+              </span>
+            )}
           </div>
 
           <div className="mt-3 text-xs text-slate-400 flex items-center justify-between">
-            <span>High Risk: TSM, NVDA, ASML</span>
-            <button onClick={() => onNavigate('/companies')} className="text-blue-400 font-semibold hover:underline">
+            <span>
+              High Risk: {stats.highRiskTickers.length > 0 ? stats.highRiskTickers.join(', ') : 'Scanning watchlist...'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const tickers = stats.atRiskTickers.join(',');
+                onNavigate(
+                  tickers
+                    ? `/companies?filter=at-risk&tickers=${encodeURIComponent(tickers)}`
+                    : '/companies?filter=at-risk'
+                );
+              }}
+              className="text-blue-400 font-semibold hover:underline shrink-0 ml-2"
+            >
               Explore
             </button>
           </div>
@@ -154,7 +237,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold font-mono text-white">5</span>
+            <span className="text-3xl font-extrabold font-mono text-white">{stats.criticalAlerts}</span>
             <button
               onClick={() => onNavigate('/alerts')}
               className="text-xs text-red-400 hover:text-red-300 font-bold flex items-center gap-1"
@@ -164,7 +247,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="mt-3 text-xs text-slate-300 font-medium truncate">
-            Taiwan Strait Live Exclusion Zone Active
+            {stats.topCriticalTitle}
           </div>
         </div>
       </div>
@@ -181,18 +264,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Composite Index measuring geopolitical, maritime chokepoint, and commodity stress.
+                {stats.trend.length < 10 && (
+                  <span className="block text-[10px] text-amber-400/90 mt-1">
+                    Building history — {stats.trend.length} day(s) recorded; daily snapshots accumulate automatically.
+                  </span>
+                )}
               </p>
             </div>
             <span className="text-xs font-mono font-bold text-slate-300 bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg">
-              30D HIGH: 74
+              30D HIGH: {stats.trendHigh}
             </span>
           </div>
 
           <div className="h-56 w-full mt-2">
+            {stats.trend.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={TREND_30_DAYS}>
+              <LineChart data={stats.trend}>
                 <XAxis dataKey="day" stroke="#64748B" fontSize={11} tickLine={false} />
-                <YAxis domain={[40, 100]} stroke="#64748B" fontSize={11} tickLine={false} />
+                <YAxis domain={['auto', 'auto']} stroke="#64748B" fontSize={11} tickLine={false} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#161B2C', borderColor: '#232A3D', borderRadius: '12px', color: '#FFF' }}
                 />
@@ -206,6 +295,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
                 />
               </LineChart>
             </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-xs text-slate-500">
+                Collecting trend data from live news feeds...
+              </div>
+            )}
           </div>
         </div>
 
@@ -220,13 +314,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
           </div>
 
           <div className="my-4">
-            <RiskGauge score={31} size="lg" label="BEARISH SENTIMENT" />
+            <RiskGauge score={stats.sentiment.gaugeScore} size="lg" label={stats.sentiment.label} />
           </div>
 
           <div className="w-full bg-[#161B2C] border border-[#232A3D] p-3 rounded-xl text-xs text-slate-300 flex items-center justify-between font-mono">
-            <span>BEARISH: 69%</span>
-            <span>NEUTRAL: 21%</span>
-            <span>BULLISH: 10%</span>
+            <span>BEARISH: {stats.sentiment.bearishPct}%</span>
+            <span>NEUTRAL: {stats.sentiment.neutralPct}%</span>
+            <span>BULLISH: {stats.sentiment.bullishPct}%</span>
           </div>
         </div>
       </div>
@@ -298,10 +392,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
         <div className="h-40 bg-[#161B2C] rounded-xl border border-[#232A3D] flex items-center justify-center relative overflow-hidden">
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#3B82F6_1px,transparent_1px)] [background-size:16px_16px]" />
           <div className="z-10 text-center space-y-2">
-            <div className="flex justify-center gap-4 text-xs font-mono">
-              <span className="px-2.5 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/30">Taiwan: 88 Critical</span>
-              <span className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">Hormuz: 81 High</span>
-              <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">US: 32 Low</span>
+            <div className="flex justify-center gap-4 text-xs font-mono flex-wrap">
+              {stats.topCountries.slice(0, 3).map((c) => (
+                <span
+                  key={c.id}
+                  className={`px-2.5 py-1 rounded border ${
+                    c.riskLevel === 'Critical'
+                      ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                      : c.riskLevel === 'High'
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  }`}
+                >
+                  {c.name.split(' ')[0]}: {c.riskScore} {c.riskLevel}
+                </span>
+              ))}
             </div>
             <p className="text-xs text-slate-400">Click to enter the full GIS Geographic Threat Studio</p>
           </div>
@@ -317,19 +422,43 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
               <Zap className="w-4 h-4 text-purple-400" />
               AI Risk Insights
             </h3>
-            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono">AUTOGEN</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono">
+                {intelligence.source === 'gemini' ? 'GEMINI' : 'LIVE'}
+              </span>
+              {intelligence.generatedAt && (
+                <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
+                  {new Date(intelligence.generatedAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
           </div>
 
-          <ul className="space-y-3 text-xs text-slate-300 leading-relaxed">
-            <li className="flex gap-2.5 p-2.5 rounded-xl bg-[#161B2C] border border-[#232A3D]">
-              <span className="text-purple-400 font-bold">•</span>
-              <span><strong>Semiconductor Concentrated Bottleneck:</strong> Taiwan Strait live exercise zones place 22% of portfolio market value at risk within 30 days.</span>
-            </li>
-            <li className="flex gap-2.5 p-2.5 rounded-xl bg-[#161B2C] border border-[#232A3D]">
-              <span className="text-purple-400 font-bold">•</span>
-              <span><strong>Energy Transit Surcharge:</strong> War risk hull insurance spikes in Hormuz will drive Brent crude baseline above $88/bbl near-term.</span>
-            </li>
-          </ul>
+          {intelligence.loading && intelligence.insights.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
+              <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+              Analyzing live events against portfolio...
+            </div>
+          ) : intelligence.error && intelligence.insights.length === 0 ? (
+            <p className="text-xs text-amber-400 py-4">{intelligence.error}</p>
+          ) : (
+            <ul className="space-y-3 text-xs text-slate-300 leading-relaxed">
+              {intelligence.insights.map((insight) => (
+                <li
+                  key={insight.id}
+                  className="flex gap-2.5 p-2.5 rounded-xl bg-[#161B2C] border border-[#232A3D]"
+                >
+                  <span className="text-purple-400 font-bold shrink-0">•</span>
+                  <span>
+                    <strong>{insight.title}:</strong> {insight.body}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[10px] text-slate-500 font-mono">
+            Derived from {intelligence.liveEventCount} live headlines + {intelligence.portfolioTickers.length} portfolio holdings
+          </p>
         </div>
 
         {/* Recommended Actions Card */}
@@ -339,40 +468,62 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, events
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               Recommended Actions
             </h3>
-            <button onClick={() => onNavigate('/portfolio')} className="text-xs text-blue-400 hover:underline font-semibold">
+            <button
+              type="button"
+              onClick={() => onNavigate('/portfolio')}
+              className="text-xs text-blue-400 hover:underline font-semibold"
+            >
               Portfolio
             </button>
           </div>
 
-          <div className="space-y-2.5">
-            <div className="p-3 rounded-xl bg-[#161B2C] border border-[#232A3D] flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-slate-200">Hedge TSM Exposure</div>
-                <div className="text-[11px] text-slate-400">Buy out-of-the-money 60-day put options</div>
-              </div>
-              <button 
-                onClick={() => onNavigate('/portfolio')}
-                className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold"
-              >
-                Execute
-              </button>
+          {intelligence.loading && intelligence.actions.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400 py-6 justify-center">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+              Computing portfolio actions...
             </div>
-
-            <div className="p-3 rounded-xl bg-[#161B2C] border border-[#232A3D] flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-slate-200">Rebalance into Defense</div>
-                <div className="text-[11px] text-slate-400">Increase LMT allocation to 18%</div>
-              </div>
-              <button 
-                onClick={() => onNavigate('/portfolio')}
-                className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold"
-              >
-                Review
-              </button>
+          ) : intelligence.actions.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4">No actions recommended for current portfolio state.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {intelligence.actions.map((action) => (
+                <div
+                  key={action.id}
+                  className="p-3 rounded-xl bg-[#161B2C] border border-[#232A3D] flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-200">{action.title}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{action.subtitle}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAction(action)}
+                    className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shrink-0"
+                  >
+                    {action.type === 'execute' ? 'Execute' : 'Review'}
+                  </button>
+                </div>
+              ))}
             </div>
-          </div>
+          )}
         </div>
       </div>
+
+      <RecommendedActionModal
+        action={selectedAction}
+        onClose={() => setSelectedAction(null)}
+        onConfirmExecute={handleConfirmExecute}
+        onOpenPortfolioReview={handleOpenPortfolioReview}
+      />
+
+      {actionConfirmed && (
+        <div className="fixed bottom-6 right-6 z-[110] bg-emerald-600 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-lg flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          Hedge plan confirmed — opening portfolio...
+        </div>
+      )}
+      </>
+      )}
     </div>
   );
 };

@@ -1,0 +1,52 @@
+[
+  {
+    "id": "port-1",
+    "ticker": "NVDA",
+    "companyName": "NVIDIA Corporation",
+    "shares": 150,
+    "avgCost": 118.5,
+    "allocationPct": 28.5,
+    "riskScore": 78,
+    "action": "Review"
+  },
+  {
+    "id": "port-2",
+    "ticker": "TSM",
+    "companyName": "Taiwan Semiconductor Mfg.",
+    "shares": 200,
+    "avgCost": 142,
+    "allocationPct": 22,
+    "riskScore": 88,
+    "action": "Hedge / Reduce"
+  },
+  {
+    "id": "port-3",
+    "ticker": "AAPL",
+    "companyName": "Apple Inc.",
+    "shares": 120,
+    "avgCost": 210.3,
+    "allocationPct": 18.2,
+    "riskScore": 64,
+    "action": "Monitor"
+  },
+  {
+    "id": "port-4",
+    "ticker": "XOM",
+    "companyName": "Exxon Mobil Corporation",
+    "shares": 180,
+    "avgCost": 104.1,
+    "allocationPct": 16.3,
+    "riskScore": 71,
+    "action": "Monitor"
+  },
+  {
+    "id": "port-5",
+    "ticker": "LMT",
+    "companyName": "Lockheed Martin Corporation",
+    "shares": 40,
+    "avgCost": 452,
+    "allocationPct": 15,
+    "riskScore": 35,
+    "action": "Safe"
+  }
+]

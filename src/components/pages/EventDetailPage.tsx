@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft,
   Flame,
@@ -9,12 +9,15 @@ import {
   ShieldAlert,
   BarChart2,
   Newspaper,
-  Layers
+  Layers,
+  Loader2
 } from 'lucide-react';
 import { GlobalEvent, CompanyRisk } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { LiveStockPrice } from '../common/LiveStockPrice';
 import { useLiveHeadlines, NEWS_POLL_INTERVAL_MS } from '../../lib/newsService';
+import { extractAffectedTickers } from '../../lib/affectedCompanyExtractor';
+import { resolveSourceUrl } from '../../lib/sourceLinks';
 
 interface EventDetailPageProps {
   eventId: string;
@@ -23,28 +26,127 @@ interface EventDetailPageProps {
   companies: CompanyRisk[];
 }
 
+interface ResolvedCompany {
+  ticker: string;
+  name: string;
+  riskScore: number | null;
+}
+
 export const EventDetailPage: React.FC<EventDetailPageProps> = ({
   eventId,
   onNavigate,
   events,
   companies
 }) => {
-  const event = events.find((e) => e.id === eventId) || events[0];
+  const event = events.find((e) => e.id === eventId) ?? events[0] ?? null;
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'impact' | 'news' | 'similar'>('overview');
+  const [resolvedCompanies, setResolvedCompanies] = useState<ResolvedCompany[]>([]);
+  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const [companiesError, setCompaniesError] = useState<string | null>(null);
 
   const { feed: newsFeed, loading: newsLoading } = useLiveHeadlines('all', NEWS_POLL_INTERVAL_MS, 30);
 
-  const relatedNews = (newsFeed?.articles || []).filter((article) => {
-    const eventWords = event.title.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-    const text = `${article.title} ${article.description}`.toLowerCase();
-    return eventWords.some((word) => text.includes(word)) ||
-      (event.region === 'South Asia' && article.region === 'india') ||
-      (event.region === 'Global' && article.region === 'world');
-  }).slice(0, 8);
+  const eventTickers = useMemo(() => {
+    if (!event) return [];
+    if (event.affectedCompanyTickers.length > 0) return event.affectedCompanyTickers;
+    return extractAffectedTickers(`${event.title} ${event.description}`);
+  }, [event]);
+
+  useEffect(() => {
+    if (!event) {
+      setResolvedCompanies([]);
+      setCompaniesLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAffectedCompanies() {
+      if (eventTickers.length === 0) {
+        setResolvedCompanies([]);
+        setCompaniesLoading(false);
+        setCompaniesError(null);
+        return;
+      }
+
+      setCompaniesLoading(true);
+      setCompaniesError(null);
+
+      try {
+        const results = await Promise.all(
+          eventTickers.map(async (ticker): Promise<ResolvedCompany> => {
+            const local = companies.find((c) => c.ticker === ticker);
+            if (local) {
+              return { ticker, name: local.name, riskScore: local.riskScore };
+            }
+
+            try {
+              const res = await fetch(`/api/companies/${encodeURIComponent(ticker)}`, {
+                cache: 'no-store',
+                headers: { Accept: 'application/json' }
+              });
+              if (res.ok) {
+                const profile = await res.json();
+                return { ticker, name: profile.name || ticker, riskScore: profile.riskScore ?? null };
+              }
+            } catch (err) {
+              console.warn(`Failed to load profile for ${ticker}:`, err);
+            }
+
+            return { ticker, name: ticker, riskScore: null };
+          })
+        );
+
+        if (!cancelled) {
+          setResolvedCompanies(results);
+          setCompaniesLoading(false);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setCompaniesError(err?.message || 'Failed to load affected companies');
+          setCompaniesLoading(false);
+        }
+      }
+    }
+
+    loadAffectedCompanies();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventTickers.join(','), companies, event]);
+
+  const relatedNews = event
+    ? (newsFeed?.articles || []).filter((article) => {
+        const eventWords = event.title.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+        const text = `${article.title} ${article.description}`.toLowerCase();
+        return (
+          eventWords.some((word) => text.includes(word)) ||
+          (event.region === 'South Asia' && article.region === 'india') ||
+          (event.region === 'Global' && article.region === 'world')
+        );
+      }).slice(0, 8)
+    : [];
 
   const displayNews = relatedNews.length > 0 ? relatedNews : (newsFeed?.articles || []).slice(0, 6);
 
-  const affectedCompanies = companies.filter((c) => event.affectedCompanyTickers.includes(c.ticker));
+  if (!event) {
+    return (
+      <div className="p-6 max-w-3xl mx-auto space-y-4">
+        <button
+          type="button"
+          onClick={() => onNavigate('/events')}
+          className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Global Events Feed
+        </button>
+        <div className="bg-[#0F1420] border border-[#232A3D] p-8 rounded-2xl text-center text-slate-400">
+          <p className="text-sm font-bold text-white">Event not found</p>
+          <p className="text-xs mt-2">This news item may have expired from the live feed.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
@@ -147,7 +249,27 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {affectedCompanies.map((comp) => (
+                {companiesLoading && (
+                  <div className="col-span-full flex items-center justify-center gap-2 py-8 text-slate-400 text-xs">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading affected companies and live quotes...
+                  </div>
+                )}
+
+                {!companiesLoading && companiesError && (
+                  <div className="col-span-full text-center py-6 text-red-400 text-xs">
+                    {companiesError}
+                  </div>
+                )}
+
+                {!companiesLoading && !companiesError && resolvedCompanies.length === 0 && (
+                  <div className="col-span-full text-center py-6 text-slate-500 text-xs">
+                    No directly affected companies identified for this event.
+                  </div>
+                )}
+
+                {!companiesLoading &&
+                  resolvedCompanies.map((comp) => (
                   <div
                     key={comp.ticker}
                     onClick={() => onNavigate(`/companies?symbol=${comp.ticker}`)}
@@ -162,9 +284,11 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
 
                     <div className="flex items-center justify-between pt-1">
                       <LiveStockPrice symbol={comp.ticker} size="sm" showDetails={false} />
-                      <span className="text-[10px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
-                        Risk: {comp.riskScore}/100
-                      </span>
+                      {comp.riskScore !== null && (
+                        <span className="text-[10px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                          Risk: {comp.riskScore}/100
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -201,12 +325,33 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
             <div className="bg-[#0F1420] border border-[#232A3D] p-6 rounded-2xl shadow-xl space-y-3">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Intelligence Sources</h3>
               <div className="flex flex-wrap gap-2">
-                {event.sources.map((src) => (
-                  <span key={src} className="text-xs font-mono bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg text-slate-300 flex items-center gap-1">
-                    <ExternalLink className="w-3 h-3 text-blue-400" />
-                    {src}
-                  </span>
-                ))}
+                {event.sources.map((src) => {
+                  const sourceUrl = resolveSourceUrl(src, event);
+                  if (sourceUrl) {
+                    return (
+                      <a
+                        key={src}
+                        href={sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-mono bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg text-slate-300 flex items-center gap-1 hover:border-blue-500/50 hover:text-blue-300 cursor-pointer transition-colors"
+                      >
+                        <ExternalLink className="w-3 h-3 text-blue-400" />
+                        {src}
+                      </a>
+                    );
+                  }
+                  return (
+                    <span
+                      key={src}
+                      className="text-xs font-mono bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg text-slate-400 flex items-center gap-1 opacity-70"
+                      title="Source URL unavailable"
+                    >
+                      <ExternalLink className="w-3 h-3 text-slate-500" />
+                      {src}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           </div>

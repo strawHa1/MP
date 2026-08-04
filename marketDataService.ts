@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { getCachedQuote, setCachedQuote, CachedQuote } from './quoteCache.js';
-import { getImpactState } from './impactService.js';
+import { getImpactState, refreshImpactData } from './impactService.js';
+import { fetchHeadlines } from './newsApi.js';
+import { recordDailySnapshot } from './dashboardTrendService.js';
 import { fetchYahooQuote } from './yahooFinance.js';
 
 export interface WatchlistEntry {
@@ -412,7 +414,24 @@ const SEVERITY_WEIGHT: Record<string, number> = {
   low: 2
 };
 
-export function computeLiveCountryRisk(): {
+const SENTIMENT_WEIGHT: Record<string, number> = {
+  negative: 8,
+  neutral: 4,
+  positive: 2
+};
+
+const REGION_ISO_MAP: Record<string, string> = {
+  india: 'IN'
+};
+
+interface CountryRiskHeadline {
+  title: string;
+  description: string;
+  region: 'india' | 'world';
+  sentiment: 'negative' | 'neutral' | 'positive';
+}
+
+export function computeLiveCountryRisk(liveHeadlines: CountryRiskHeadline[] = []): {
   countries: Array<{
     id: string;
     name: string;
@@ -430,51 +449,69 @@ export function computeLiveCountryRisk(): {
 } {
   const base = getCountriesBase();
   const impactState = getImpactState();
-  const headlines: string[] = impactState.impactedCompanies.map(
-    (r) => `${r.headline} ${r.description}`.toLowerCase()
-  );
+  const previousScores = countryRiskCache
+    ? Object.fromEntries(countryRiskCache.countries.map((c) => [c.id, c.riskScore]))
+    : {};
 
   const countries = base.map((c: any) => {
     let eventsCount = 0;
     let severitySum = 0;
     const vectors: string[] = [];
+    const seenEvents = new Set<string>();
+
+    const addEvent = (headline: string, weight: number) => {
+      const key = headline.slice(0, 80);
+      if (seenEvents.has(key)) return;
+      seenEvents.add(key);
+      eventsCount++;
+      severitySum += weight;
+      if (vectors.length < 5) vectors.push(headline.slice(0, 80));
+    };
 
     for (const record of impactState.impactedCompanies) {
       const text = `${record.headline} ${record.description}`.toLowerCase();
       if (c.keywords.some((k: string) => text.includes(k))) {
-        eventsCount++;
-        severitySum += SEVERITY_WEIGHT[record.severity] || 4;
-        if (vectors.length < 5) vectors.push(record.headline.slice(0, 80));
+        addEvent(record.headline, SEVERITY_WEIGHT[record.severity] || 4);
       }
     }
 
-    for (const h of headlines) {
-      if (c.keywords.some((k: string) => h.includes(k)) && vectors.length < 5) {
-        const match = impactState.impactedCompanies.find((r) =>
-          c.keywords.some((k: string) => `${r.headline} ${r.description}`.toLowerCase().includes(k))
-        );
-        if (match && !vectors.includes(match.headline.slice(0, 80))) {
-          vectors.push(match.headline.slice(0, 80));
-        }
+    for (const article of liveHeadlines) {
+      const text = `${article.title} ${article.description}`.toLowerCase();
+      const regionMatch = REGION_ISO_MAP[article.region] === c.isoCode;
+      const keywordMatch = c.keywords.some((k: string) => text.includes(k));
+      if (regionMatch || keywordMatch) {
+        addEvent(article.title, SENTIMENT_WEIGHT[article.sentiment] || 4);
       }
     }
 
-    let riskScore = 30 + eventsCount * 6 + severitySum;
-    if (c.isoCode === 'TW') riskScore = Math.max(riskScore, 75);
-    if (c.isoCode === 'UA') riskScore = Math.max(riskScore, 80);
-    if (c.isoCode === 'OM' || c.isoCode === 'IR') riskScore = Math.max(riskScore, 55);
+    let riskScore = 25 + eventsCount * 5 + severitySum;
+    if (eventsCount === 0) {
+      const structuralBaseline: Record<string, number> = {
+        TW: 45,
+        UA: 50,
+        OM: 40,
+        IR: 40
+      };
+      if (structuralBaseline[c.isoCode]) {
+        riskScore = Math.max(riskScore, structuralBaseline[c.isoCode]);
+      }
+    }
     riskScore = Math.min(100, Math.max(15, Math.round(riskScore)));
 
     const riskLevel =
       riskScore >= 80 ? 'Critical' : riskScore >= 65 ? 'High' : riskScore >= 45 ? 'Medium' : 'Low';
 
     const defaultRisks: Record<string, string[]> = {
-      TW: ['Naval exclusion zone exercises', 'Semiconductor supply chain concentration'],
-      UA: ['Black Sea corridor disruption', 'Energy grid damage'],
+      TW: ['Semiconductor supply chain concentration', 'Taiwan Strait maritime risk'],
+      UA: ['Black Sea corridor disruption', 'Energy infrastructure risk'],
       IL: ['Regional missile threats', 'Port transit delays'],
-      OM: ['Oil tanker incidents', 'Maritime war insurance spikes'],
-      US: ['Fiscal policy shifts', 'Critical infrastructure cyber risk']
+      OM: ['Oil tanker transit risk', 'Maritime war insurance spikes'],
+      US: ['Fiscal policy shifts', 'Critical infrastructure cyber risk'],
+      IN: ['Currency volatility', 'Foreign capital flow sensitivity'],
+      JP: ['Yen exchange rate pressure', 'Export sector exposure']
     };
+
+    const prevScore = previousScores[c.id];
 
     return {
       id: c.id,
@@ -484,10 +521,10 @@ export function computeLiveCountryRisk(): {
       region: c.region,
       riskScore,
       riskLevel,
-      eventsCount: eventsCount || (riskScore >= 70 ? 2 : riskScore >= 50 ? 1 : 0),
+      eventsCount,
       keyRisks: vectors.length > 0 ? vectors : defaultRisks[c.isoCode] || ['Regional macroeconomic volatility'],
-      scoreChanged: eventsCount > 0,
-      previousScore: riskScore - (eventsCount > 0 ? 3 : 0)
+      scoreChanged: prevScore != null && prevScore !== riskScore,
+      previousScore: prevScore != null && prevScore !== riskScore ? prevScore : undefined
     };
   });
 
@@ -499,11 +536,40 @@ let countryRiskCache: ReturnType<typeof computeLiveCountryRisk> | null = null;
 let countryRiskCacheTime = 0;
 const COUNTRY_CACHE_MS = 5 * 60 * 1000;
 
+export async function getLiveCountryRisk(force = false) {
+  if (!force && countryRiskCache && Date.now() - countryRiskCacheTime < COUNTRY_CACHE_MS) {
+    return countryRiskCache;
+  }
+
+  if (force) {
+    await refreshImpactData(true);
+  }
+
+  const { articles } = await fetchHeadlines('all', 30);
+  const headlines: CountryRiskHeadline[] = articles.map((a) => ({
+    title: a.title,
+    description: a.description,
+    region: a.region,
+    sentiment: a.sentiment
+  }));
+
+  countryRiskCache = computeLiveCountryRisk(headlines);
+  countryRiskCacheTime = Date.now();
+  const avgScore =
+    countryRiskCache.countries.length > 0
+      ? Math.round(
+          countryRiskCache.countries.reduce((s, c) => s + c.riskScore, 0) /
+            countryRiskCache.countries.length
+        )
+      : 50;
+  recordDailySnapshot(avgScore);
+  return countryRiskCache;
+}
+
+/** @deprecated use getLiveCountryRisk */
 export function getLiveCountryRiskCached(force = false) {
   if (!force && countryRiskCache && Date.now() - countryRiskCacheTime < COUNTRY_CACHE_MS) {
     return countryRiskCache;
   }
-  countryRiskCache = computeLiveCountryRisk();
-  countryRiskCacheTime = Date.now();
-  return countryRiskCache;
+  return computeLiveCountryRisk();
 }

@@ -77,7 +77,14 @@ export function App() {
 
   const eventId = queryParams.get('id') || '';
   const companySymbol = queryParams.get('symbol') || '';
+  const companyFilter = queryParams.get('filter') || '';
+  const companyTickers = (queryParams.get('tickers') || '')
+    .split(',')
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean);
   const simulationScenario = queryParams.get('scenario') || '';
+  const portfolioReviewTicker = queryParams.get('review') || '';
+  const portfolioAction = queryParams.get('action') || '';
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={handleLogin} />;
@@ -113,7 +120,7 @@ export function App() {
             <DashboardPage
               onNavigate={navigate}
               events={events}
-              companies={companies}
+              alerts={alerts}
               newsLastUpdated={newsFeed?.lastUpdated}
             />
           )}
@@ -134,6 +141,8 @@ export function App() {
           {baseRoute === '/companies' && (
             <CompanyExplorerPage
               initialSymbol={companySymbol}
+              filter={companyFilter}
+              filterTickers={companyTickers}
               onNavigate={navigate}
               companies={companies}
               userRiskTolerance={userRiskTolerance}
@@ -165,6 +174,8 @@ export function App() {
               onNavigate={navigate}
               companies={companies}
               userRiskTolerance={userRiskTolerance}
+              initialReviewTicker={portfolioReviewTicker}
+              initialAction={portfolioAction}
             />
           )}
 

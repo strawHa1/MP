@@ -17,11 +17,18 @@ import {
   getCompanyProfile,
   getSectorsConfig,
   getSectorLiveData,
-  getLiveCountryRiskCached,
+  getLiveCountryRisk,
   fetchQuote,
   fetchQuotesBatch
 } from './marketDataService.js';
 import { searchMarketSymbols, refreshSearchQuotes, initSearchUniverse } from './searchService.js';
+import {
+  getTrendHistory,
+  backfillTrendFromHeadlines,
+  initDashboardTrendService,
+  startDashboardTrendCron
+} from './dashboardTrendService.js';
+import { getDashboardIntelligence } from './dashboardIntelligenceService.js';
 
 dotenv.config();
 
@@ -187,10 +194,43 @@ app.get('/api/sectors/:id', async (req, res) => {
   }
 });
 
-/** Live country risk scores from news/impact pipeline */
-app.get('/api/countries/risk', (req, res) => {
-  const force = req.query.refresh === 'true';
-  res.json(getLiveCountryRiskCached(force));
+/** Global risk score 30-day trend (daily snapshots + headline backfill) */
+app.get('/api/dashboard/trend', async (req, res) => {
+  try {
+    const force = req.query.refresh === 'true';
+    if (force) await backfillTrendFromHeadlines();
+    const trend = getTrendHistory(30);
+    res.set('Cache-Control', 'no-store');
+    res.json({ ...trend, lastUpdated: new Date().toISOString() });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Failed to load trend' });
+  }
+});
+
+/** AI insights + recommended actions from live data + portfolio */
+app.get('/api/dashboard/intelligence', async (req, res) => {
+  try {
+    const force = req.query.refresh === 'true';
+    const data = await getDashboardIntelligence(force);
+    res.set('Cache-Control', 'no-store');
+    res.json(data);
+  } catch (e: any) {
+    console.error('Dashboard intelligence error:', e);
+    res.status(500).json({ error: e?.message || 'Failed to load dashboard intelligence' });
+  }
+});
+
+/** Live country risk scores from news headlines + impact pipeline */
+app.get('/api/countries/risk', async (req, res) => {
+  try {
+    const force = req.query.refresh === 'true';
+    const data = await getLiveCountryRisk(force);
+    res.set('Cache-Control', 'no-store');
+    res.json(data);
+  } catch (e: any) {
+    console.error('Country risk error:', e);
+    res.status(500).json({ error: e?.message || 'Failed to load country risk' });
+  }
 });
 
 /**
@@ -495,6 +535,8 @@ async function startServer() {
     startImpactCron();
     startImpactPricePolling(30_000);
     initSearchUniverse();
+    initDashboardTrendService();
+    startDashboardTrendCron();
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {

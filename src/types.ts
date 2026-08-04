@@ -79,6 +79,7 @@ export interface GlobalEvent {
   marketImpactSummary: string;
   timeline?: { date: string; title: string; detail: string }[];
   url?: string;
+  sourceLinks?: { name: string; url: string }[];
   isLive?: boolean;
 }
 
@@ -107,6 +108,7 @@ export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
 
 export interface StockImpactRecord {
   id: string;
+  newsId?: string;
   ticker: string;
   companyName: string;
   sector: string;

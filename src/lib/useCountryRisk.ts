@@ -7,11 +7,13 @@ export function useCountryRisk() {
   const [countries, setCountries] = useState<LiveCountryRisk[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [changedIds, setChangedIds] = useState<Set<string>>(new Set());
   const mounted = useRef(true);
 
   const load = useCallback(async (force = false) => {
+    if (force) setRefreshing(true);
     try {
       const res = await fetch(`/api/countries/risk${force ? '?refresh=true' : ''}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load country risk');
@@ -23,7 +25,9 @@ export function useCountryRisk() {
       setCountries(data.countries || []);
       setLastUpdated(data.lastUpdated);
       setChangedIds(changed);
+      setError(null);
       setLoading(false);
+      setRefreshing(false);
       if (changed.size > 0) {
         setTimeout(() => mounted.current && setChangedIds(new Set()), 4000);
       }
@@ -31,6 +35,7 @@ export function useCountryRisk() {
       if (mounted.current) {
         setError(e?.message || 'Country risk unavailable');
         setLoading(false);
+        setRefreshing(false);
       }
     }
   }, []);
@@ -38,12 +43,12 @@ export function useCountryRisk() {
   useEffect(() => {
     mounted.current = true;
     load();
-    const timer = setInterval(load, POLL_MS);
+    const timer = setInterval(() => load(), POLL_MS);
     return () => {
       mounted.current = false;
       clearInterval(timer);
     };
   }, [load]);
 
-  return { countries, lastUpdated, loading, error, changedIds, refresh: () => load(true) };
+  return { countries, lastUpdated, loading, refreshing, error, changedIds, refresh: () => load(true) };
 }

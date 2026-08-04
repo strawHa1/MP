@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Briefcase,
   TrendingUp,
@@ -22,6 +22,8 @@ interface PortfolioRiskPageProps {
   onNavigate: (path: string) => void;
   companies: CompanyRisk[];
   userRiskTolerance?: number;
+  initialReviewTicker?: string;
+  initialAction?: string;
 }
 
 const COLORS = ['#3B82F6', '#8B5CF6', '#EC4899', '#10B981', '#F59E0B'];
@@ -29,10 +31,27 @@ const COLORS = ['#3B82F6', '#8B5CF6', '#EC4899', '#10B981', '#F59E0B'];
 export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
   onNavigate,
   companies,
-  userRiskTolerance = 55
+  userRiskTolerance = 55,
+  initialReviewTicker = '',
+  initialAction = ''
 }) => {
   const holdings: PortfolioHolding[] = INITIAL_PORTFOLIO;
-  const [selectedReviewTicker, setSelectedReviewTicker] = useState<string | null>(null);
+  const [selectedReviewTicker, setSelectedReviewTicker] = useState<string | null>(
+    initialReviewTicker ? initialReviewTicker.toUpperCase() : null
+  );
+  const reviewRowRef = useRef<HTMLTableRowElement | null>(null);
+
+  useEffect(() => {
+    if (initialReviewTicker) {
+      setSelectedReviewTicker(initialReviewTicker.toUpperCase());
+    }
+  }, [initialReviewTicker]);
+
+  useEffect(() => {
+    if (selectedReviewTicker && reviewRowRef.current) {
+      reviewRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [selectedReviewTicker]);
 
   const totalValue = holdings.reduce((sum, h) => {
     const val = h.currentValue ?? (h.shares * (h.avgCost || h.costBasis || 100));
@@ -91,6 +110,28 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
           Stress Test Portfolio →
         </button>
       </div>
+
+      {selectedReviewTicker && (
+        <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-100 space-y-1">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-blue-300">
+            {initialAction === 'hedge' ? 'Hedge Plan Review' : initialAction === 'rebalance' ? 'Rebalance Review' : 'Position Review'} — ${selectedReviewTicker}
+          </h3>
+          <p className="text-xs text-blue-100/90 leading-relaxed">
+            {initialAction === 'hedge'
+              ? 'Review the highlighted holding below. Confirm sizing before executing a protective put hedge via your broker.'
+              : initialAction === 'rebalance'
+                ? 'Compare current vs target allocation for the highlighted defensive position.'
+                : 'Review the highlighted portfolio position and live risk signal.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigate(`/companies?symbol=${selectedReviewTicker}`)}
+            className="text-[11px] text-blue-300 hover:underline font-semibold mt-1"
+          >
+            Open ${selectedReviewTicker} company analysis →
+          </button>
+        </div>
+      )}
 
       {/* Flagged Position Capital Loss Warning Banner */}
       {flaggedHoldings.length > 0 && (
@@ -194,8 +235,18 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
                   };
                   const signal = computeInvestmentRiskSignal(comp, 2, userRiskTolerance);
 
+                  const isHighlighted = selectedReviewTicker === h.ticker;
+
                   return (
-                    <tr key={h.id} className="hover:bg-slate-50 dark:hover:bg-[#161B2C] transition-colors">
+                    <tr
+                      key={h.id}
+                      ref={isHighlighted ? reviewRowRef : undefined}
+                      className={`transition-colors ${
+                        isHighlighted
+                          ? 'bg-blue-500/10 ring-1 ring-blue-500/40'
+                          : 'hover:bg-slate-50 dark:hover:bg-[#161B2C]'
+                      }`}
+                    >
                       <td className="py-3.5 px-3">
                         <div className="font-bold text-slate-900 dark:text-white">{companyName}</div>
                         <div className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">${h.ticker}</div>

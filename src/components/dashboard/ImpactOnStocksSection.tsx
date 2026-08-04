@@ -143,6 +143,7 @@ export const ImpactOnStocksSection: React.FC<ImpactOnStocksSectionProps> = ({ on
         record={selected}
         onClose={() => setSelected(null)}
         onNavigateCompany={(ticker) => onNavigate(`/companies?symbol=${ticker}`)}
+        onNavigateEvent={(newsId) => onNavigate(`/events?id=${encodeURIComponent(newsId)}`)}
       />
     </>
   );

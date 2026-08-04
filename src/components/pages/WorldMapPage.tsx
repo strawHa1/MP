@@ -9,7 +9,7 @@ interface WorldMapPageProps {
 }
 
 export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
-  const { countries, lastUpdated, loading, error, changedIds, refresh } = useCountryRisk();
+  const { countries, lastUpdated, loading, refreshing, error, changedIds, refresh } = useCountryRisk();
   const [selectedCountry, setSelectedCountry] = useState<LiveCountryRisk | null>(null);
   const [filterLevel, setFilterLevel] = useState('all');
 
@@ -47,8 +47,8 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
             <option value="medium">Medium</option>
             <option value="low">Low</option>
           </select>
-          <button onClick={refresh} className="p-2 rounded-xl bg-[#161B2C] border border-[#232A3D] text-slate-400 hover:text-white">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <button onClick={refresh} disabled={refreshing} className="p-2 rounded-xl bg-[#161B2C] border border-[#232A3D] text-slate-400 hover:text-white disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>

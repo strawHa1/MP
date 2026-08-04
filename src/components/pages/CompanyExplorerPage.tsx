@@ -21,6 +21,8 @@ import { computeInvestmentRiskSignal, InvestmentSignalLabel } from '../../utils/
 
 interface CompanyExplorerPageProps {
   initialSymbol?: string;
+  filter?: string;
+  filterTickers?: string[];
   onNavigate: (path: string) => void;
   companies: CompanyRisk[];
   userRiskTolerance?: number;
@@ -52,9 +54,13 @@ function signalIcon(label: InvestmentSignalLabel) {
 
 export const CompanyExplorerPage: React.FC<CompanyExplorerPageProps> = ({
   initialSymbol = '',
+  filter = '',
+  filterTickers = [],
+  onNavigate,
   companies,
   userRiskTolerance = 55
 }) => {
+  const isAtRiskView = filter === 'at-risk';
   const [selectedTicker, setSelectedTicker] = useState(initialSymbol.toUpperCase());
   const [chips, setChips] = useState<{ ticker: string; name?: string }[]>(getQuickAccessChips(10));
 
@@ -116,6 +122,56 @@ export const CompanyExplorerPage: React.FC<CompanyExplorerPageProps> = ({
 
   const profit = signal ? profitStatus(signal.label) : null;
   const SignalIcon = signal ? signalIcon(signal.label) : Info;
+
+  if (isAtRiskView && !hasSelection) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] p-6 max-w-4xl mx-auto font-sans space-y-6">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-mono text-purple-400 font-bold uppercase tracking-wider">
+            <Building2 className="w-4 h-4" />
+            Companies at Risk
+          </div>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight mt-1">High-Risk Watchlist</h1>
+          <p className="text-slate-400 text-xs mt-1">
+            Live news-to-price impact signals from the impact pipeline
+          </p>
+        </div>
+
+        {filterTickers.length === 0 ? (
+          <div className="bg-[#0F1420] border border-[#232A3D] p-8 rounded-2xl text-center text-slate-400 text-sm">
+            No impacted companies detected right now. Check back after the next news refresh.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {filterTickers.map((ticker) => (
+              <button
+                key={ticker}
+                type="button"
+                onClick={() => onNavigate(`/companies?symbol=${encodeURIComponent(ticker)}`)}
+                className="text-left p-4 rounded-xl bg-[#0F1420] border border-[#232A3D] hover:border-purple-500/50 transition-all space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-white">${ticker}</span>
+                  <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                    At Risk
+                  </span>
+                </div>
+                <LiveStockPrice symbol={ticker} size="sm" showDetails={false} />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onNavigate('/companies')}
+          className="text-xs text-blue-400 hover:underline font-semibold"
+        >
+          ← Search all companies
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex flex-col p-6 max-w-3xl mx-auto font-sans">

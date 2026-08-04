@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NewsArticle, NewsFeedResponse, GlobalEvent } from '../types';
+import { extractAffectedTickers } from './affectedCompanyExtractor';
 
 const headlinesCache: Record<string, { data: NewsFeedResponse; timestamp: number }> = {};
 const companyCache: Record<string, { data: NewsArticle[]; timestamp: number }> = {};
@@ -25,6 +26,8 @@ export function articleToGlobalEvent(article: NewsArticle, index: number): Globa
         ? 25 + (index % 15)
         : 45 + (index % 20);
 
+  const eventText = `${article.title} ${article.description}`;
+
   return {
     id: article.id,
     title: article.title,
@@ -35,10 +38,11 @@ export function articleToGlobalEvent(article: NewsArticle, index: number): Globa
     countryIso: article.region === 'india' ? 'IN' : undefined,
     sources: [article.source],
     reportedAt: article.timeAgo,
-    category: inferCategory(`${article.title} ${article.description}`),
-    affectedCompanyTickers: [],
+    category: inferCategory(eventText),
+    affectedCompanyTickers: extractAffectedTickers(eventText),
     marketImpactSummary: article.description.slice(0, 200),
     url: article.url,
+    sourceLinks: [{ name: article.source, url: article.url }],
     isLive: true
   };
 }

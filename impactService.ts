@@ -14,6 +14,7 @@ export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
 
 export interface StockImpactRecord {
   id: string;
+  newsId?: string;
   ticker: string;
   companyName: string;
   sector: string;
@@ -509,6 +510,7 @@ export async function refreshImpactData(force = false): Promise<ImpactCacheState
 
           records.push({
             id: hashId(key),
+            newsId: news.id,
             ticker: impact.ticker,
             companyName: meta.name,
             sector: meta.sector,
@@ -519,7 +521,7 @@ export async function refreshImpactData(force = false): Promise<ImpactCacheState
             source: news.source,
             publishedAt: news.publishedAt,
             timeAgo: formatTimeAgo(news.publishedAt),
-            url: news.url,
+            url: (news.url || '').replace(/&amp;/g, '&'),
             sentiment: impact.sentiment,
             severity: impact.severity,
             projectedImpactPct: { min: impact.projectedMin, max: impact.projectedMax },
