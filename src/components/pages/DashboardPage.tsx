@@ -92,13 +92,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
-          <button
-            onClick={() => onNavigate('/simulations')}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
-          >
-            <Zap className="w-4 h-4 text-yellow-300" />
-            Run AI Simulation
-          </button>
         </div>
       </div>
 

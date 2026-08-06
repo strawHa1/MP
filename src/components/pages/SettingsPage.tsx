@@ -276,7 +276,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">ACTIVE (SERVER-SIDE)</span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Injected via GEMINI_API_KEY environment variable. Drives risk scenario simulations & executive intelligence summaries.
+                Injected via GEMINI_API_KEY environment variable. Drives executive intelligence summaries and impact classification.
               </p>
             </div>
           </div>

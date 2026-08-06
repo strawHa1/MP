@@ -9,7 +9,6 @@ import { CompanyExplorerPage } from './components/pages/CompanyExplorerPage';
 import { SectorExplorerPage } from './components/pages/SectorExplorerPage';
 import { WorldMapPage } from './components/pages/WorldMapPage';
 import { ReportsPage } from './components/pages/ReportsPage';
-import { SimulationStudioPage } from './components/pages/SimulationStudioPage';
 import { PortfolioRiskPage } from './components/pages/PortfolioRiskPage';
 import { AlertsPage } from './components/pages/AlertsPage';
 import { ChatAssistantPage } from './components/pages/ChatAssistantPage';
@@ -82,7 +81,6 @@ export function App() {
     .split(',')
     .map((t) => t.trim().toUpperCase())
     .filter(Boolean);
-  const simulationScenario = queryParams.get('scenario') || '';
   const portfolioReviewTicker = queryParams.get('review') || '';
   const portfolioAction = queryParams.get('action') || '';
 
@@ -160,13 +158,6 @@ export function App() {
 
           {baseRoute === '/reports' && (
             <ReportsPage onNavigate={navigate} />
-          )}
-
-          {baseRoute === '/simulations' && (
-            <SimulationStudioPage
-              initialScenario={simulationScenario}
-              onNavigate={navigate}
-            />
           )}
 
           {baseRoute === '/portfolio' && (

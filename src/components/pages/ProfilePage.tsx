@@ -59,7 +59,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ onNavigate, onLogout }
               <span className="text-purple-400 font-bold">Enterprise Intelligence</span>
             </div>
             <div className="flex justify-between py-1 border-b border-[#232A3D]">
-              <span className="text-slate-500">Simulations / Mo:</span>
+              <span className="text-slate-500">AI Reports / Mo:</span>
               <span className="text-emerald-400 font-bold">Unlimited</span>
             </div>
             <div className="flex justify-between py-1 border-b border-[#232A3D]">

@@ -9,6 +9,7 @@ import { GoogleGenAI } from '@google/genai';
 import { fetchHeadlines } from './newsApi.js';
 import { getImpactState } from './impactService.js';
 import { getLiveCountryRisk } from './marketDataService.js';
+import { getGeminiApiKey } from './envConfig.js';
 
 export interface PortfolioRow {
   id: string;
@@ -59,7 +60,7 @@ let cache: { payload: DashboardIntelligencePayload; at: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function getGenAI(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
   return new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
 }

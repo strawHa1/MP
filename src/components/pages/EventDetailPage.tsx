@@ -388,10 +388,11 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({
           </p>
 
           <button
-            onClick={() => onNavigate(`/simulations?scenario=${encodeURIComponent(event.title)}`)}
+            type="button"
+            onClick={() => onNavigate('/portfolio')}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg"
           >
-            Run Full "What-If" AI Simulation for this Event →
+            Review Portfolio Exposure →
           </button>
         </div>
       )}

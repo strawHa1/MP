@@ -29,17 +29,28 @@ import {
   startDashboardTrendCron
 } from './dashboardTrendService.js';
 import { getDashboardIntelligence } from './dashboardIntelligenceService.js';
+import { getGeminiApiKey, logGeminiKeyStatus } from './envConfig.js';
+import {
+  buildLocalChatReply,
+  formatContextForPrompt,
+  gatherLiveChatContext,
+  streamTextChunks
+} from './localChatService.js';
 
-dotenv.config();
+// Loaded before any request handler runs; every module reads process.env lazily
+// inside functions, so this single call covers the whole server. Both paths are
+// listed so `node dist/server.cjs` resolves env the same way `tsx` does in dev.
+dotenv.config({ path: ['.env.local', '.env'] });
 
 const app = express();
 const PORT = 3002;
+const ENV_FILE_PATH = path.join(process.cwd(), '.env');
 
 app.use(express.json());
 
 // Initialize Gemini AI Client
 const getGenAI = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
@@ -234,108 +245,6 @@ app.get('/api/countries/risk', async (req, res) => {
 });
 
 /**
- * AI Risk Scenario Simulation Endpoint (Google GenAI)
- */
-app.post('/api/simulations/run', async (req, res) => {
-  const { scenario } = req.body;
-  if (!scenario) {
-    return res.status(400).json({ error: 'Scenario description is required' });
-  }
-
-  const ai = getGenAI();
-  if (!ai) {
-    // Fallback response if GEMINI_API_KEY is missing
-    return res.json({
-      id: `sim-${Date.now()}`,
-      scenarioText: scenario,
-      marketImpactPct: -4.8,
-      affectedCompaniesCount: 42,
-      recoveryTimeRange: '45 - 90 Days',
-      probabilityPct: 68,
-      aiSummary: `Simulation analysis for "${scenario}": High probability of supply chain friction resulting in immediate margin compression for regional hardware manufacturers and transportation choke points.`,
-      affectedTickers: [
-        { ticker: 'TSM', name: 'TSMC', impactPct: -8.4, riskLevel: 'Critical' },
-        { ticker: 'NVDA', name: 'NVIDIA', impactPct: -6.2, riskLevel: 'High' },
-        { ticker: 'AAPL', name: 'Apple', impactPct: -3.5, riskLevel: 'Medium' },
-        { ticker: 'XOM', name: 'Exxon Mobil', impactPct: 4.1, riskLevel: 'Positive' }
-      ],
-      supplyChainRisks: [
-        'Maritime insurance freight premiums spike +140%',
-        'Air cargo volume re-routed via secondary hubs',
-        '30-day inventory buffers depleted across Tier-1 suppliers'
-      ],
-      marketImpactTimeline: [
-        { day: 'Day 1', S_AND_P: -1.2, TechSector: -2.8, EnergySector: 1.5 },
-        { day: 'Day 7', S_AND_P: -3.4, TechSector: -5.8, EnergySector: 3.2 },
-        { day: 'Day 30', S_AND_P: -4.8, TechSector: -8.2, EnergySector: 5.1 },
-        { day: 'Day 60', S_AND_P: -2.1, TechSector: -4.1, EnergySector: 2.8 },
-        { day: 'Day 90', S_AND_P: -0.5, TechSector: -1.2, EnergySector: 1.0 }
-      ]
-    });
-  }
-
-  try {
-    const prompt = `You are Black Swan, a world-class financial risk intelligence AI engine.
-Analyze the following macroeconomic or geopolitical risk scenario and return structured risk impact quantitative metrics:
-Scenario: "${scenario}"
-
-Respond ONLY with valid JSON adhering to this exact schema:
-{
-  "marketImpactPct": number (e.g. -5.2 for negative impact or 2.1 for positive),
-  "affectedCompaniesCount": number (integer, e.g. 38),
-  "recoveryTimeRange": string (e.g. "30 - 60 Days"),
-  "probabilityPct": number (integer between 1 and 100),
-  "aiSummary": string (2-3 concise sentences explaining the financial mechanisms, supply chain risks, and market transmission channels),
-  "affectedTickers": [
-    { "ticker": "TSM", "name": "Taiwan Semiconductor", "impactPct": -8.5, "riskLevel": "Critical" },
-    { "ticker": "NVDA", "name": "NVIDIA", "impactPct": -6.2, "riskLevel": "High" },
-    { "ticker": "XOM", "name": "Exxon Mobil", "impactPct": 3.4, "riskLevel": "Low" }
-  ],
-  "supplyChainRisks": [
-    "string risk point 1",
-    "string risk point 2",
-    "string risk point 3"
-  ],
-  "marketImpactTimeline": [
-    { "day": "Day 1", "S_AND_P": -1.5, "TechSector": -3.2, "EnergySector": 1.2 },
-    { "day": "Day 7", "S_AND_P": -3.8, "TechSector: -6.5, "EnergySector": 2.8 },
-    { "day": "Day 30", "S_AND_P": -5.2, "TechSector": -8.9, "EnergySector": 4.1 },
-    { "day": "Day 60", "S_AND_P": -2.8, "TechSector": -4.5, "EnergySector": 2.0 },
-    { "day": "Day 90", "S_AND_P": -0.8, "TechSector": -1.5, "EnergySector": 0.8 }
-  ]
-}`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0.2
-      }
-    });
-
-    const jsonText = response.text || '';
-    const parsed = JSON.parse(jsonText);
-
-    return res.json({
-      id: `sim-${Date.now()}`,
-      scenarioText: scenario,
-      marketImpactPct: parsed.marketImpactPct ?? -4.5,
-      affectedCompaniesCount: parsed.affectedCompaniesCount ?? 35,
-      recoveryTimeRange: parsed.recoveryTimeRange ?? '60 - 90 Days',
-      probabilityPct: parsed.probabilityPct ?? 72,
-      aiSummary: parsed.aiSummary ?? 'High systemic impact expected across global markets.',
-      affectedTickers: parsed.affectedTickers ?? [],
-      supplyChainRisks: parsed.supplyChainRisks ?? [],
-      marketImpactTimeline: parsed.marketImpactTimeline ?? []
-    });
-  } catch (error: any) {
-    console.error('Gemini simulation error:', error);
-    return res.status(500).json({ error: 'Failed to run AI simulation' });
-  }
-});
-
-/**
  * AI Report Generation Endpoint
  */
 app.post('/api/reports/generate', async (req, res) => {
@@ -399,48 +308,193 @@ Return JSON with this schema:
   }
 });
 
+const CHAT_SYSTEM_PROMPT = `You are Black Swan AI, an elite quantitative financial risk intelligence assistant on the Black Swan platform.
+Your role is to analyze geopolitical events, market sentiment, stock risk scores (e.g., NVDA, TSM, XOM, LMT), portfolio hedging strategies, and supply chain bottlenecks.
+
+The platform can also execute these actions for the user, so mention them when relevant:
+- Invest or withdraw a dollar amount from a stock (always requires explicit user confirmation).
+- Create price alerts (e.g. "Alert me if TSM drops below $150") and risk-index alerts.
+
+Format responses in Markdown. Use bold for key figures, bullet points for lists, and tables when comparing multiple tickers.
+Keep responses clear, professional, direct, and analytical. Never invent live prices — describe drivers and ranges instead.`;
+
 /**
- * AI Financial Assistant Chat Endpoint
+ * Translates the client's ChatMessage[] history into the Gemini `contents` shape.
+ *
+ * The client sends { sender, text }; the SDK expects { role, parts }. Gemini also
+ * requires the history to open on a user turn, so the seeded assistant greeting is
+ * dropped and only the most recent turns are forwarded.
  */
-app.post('/api/chat', async (req, res) => {
+function buildChatHistory(history: unknown) {
+  const mapped = (Array.isArray(history) ? history : [])
+    .filter((h: any) => typeof h?.text === 'string' && h.text.trim().length > 0)
+    .slice(-20)
+    .map((h: any) => ({
+      role: h.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: String(h.text) }]
+    }));
+
+  while (mapped.length > 0 && mapped[0].role !== 'user') {
+    mapped.shift();
+  }
+  return mapped;
+}
+
+async function createChatSession(ai: GoogleGenAI, history: unknown) {
+  // Ground the model in the same live snapshot the local fallback uses so answers
+  // stay consistent whether Gemini is on or off.
+  let liveBlock = '';
+  try {
+    liveBlock = '\n\n' + formatContextForPrompt(await gatherLiveChatContext());
+  } catch (e: any) {
+    console.warn('[AI] Live context gather failed:', e?.message || e);
+  }
+
+  return ai.chats.create({
+    model: 'gemini-2.5-flash',
+    config: {
+      systemInstruction: CHAT_SYSTEM_PROMPT + liveBlock,
+      temperature: 0.4
+    },
+    history: buildChatHistory(history)
+  });
+}
+
+/** Stream a locally built reply word-by-word so the UI still feels ChatGPT-like. */
+async function streamLocalReply(
+  message: string,
+  send: (payload: Record<string, unknown>) => void,
+  aborted: () => boolean
+) {
+  const reply = await buildLocalChatReply(message);
+  for await (const delta of streamTextChunks(reply)) {
+    if (aborted()) return;
+    send({ delta, source: 'local' });
+  }
+  if (!aborted()) send({ done: true, source: 'local' });
+}
+
+/**
+ * Streaming chat endpoint (Server-Sent Events).
+ *
+ * Primary path: Gemini token stream when a key is set.
+ * Fallback: live-data local reply streamed in small chunks (same SSE shape) so the
+ * assistant still answers risk questions without a key.
+ */
+app.post('/api/chat/stream', async (req, res) => {
   const { message, history } = req.body;
-  if (!message) return res.status(400).json({ error: 'Message required' });
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Message required' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  // Disables proxy buffering so chunks reach the browser immediately.
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const send = (payload: Record<string, unknown>) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  let aborted = false;
+  // Use the response socket — `req` "close" fires as soon as the POST body is
+  // fully read, which would abort the stream before the first token is written.
+  res.on('close', () => {
+    aborted = true;
+  });
 
   const ai = getGenAI();
   if (!ai) {
-    return res.json({
-      reply: `I am Black Swan AI, your financial risk intelligence assistant. Regarding "${message}", global market metrics indicate elevated tail-risk in East Asian tech supply chains and Middle Eastern maritime energy corridors. How can I assist you with specific ticker or portfolio analysis?`,
-      widget: null
-    });
+    try {
+      await streamLocalReply(message, send, () => aborted);
+    } catch (e: any) {
+      console.error('[AI] Local chat stream error:', e?.message || e);
+      if (!aborted) {
+        send({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
+        send({ done: true });
+      }
+    }
+    return res.end();
   }
 
   try {
-    const systemPrompt = `You are Black Swan AI, a elite quantitative financial risk intelligence assistant on the Black Swan platform.
-Your role is to analyze geopolitical events, market sentiment, stock risk scores (e.g., NVDA, TSM, XOM, LMT), portfolio hedging strategies, and supply chain bottlenecks.
-Keep responses clear, professional, direct, analytical, and structured with concise bullet points where appropriate.`;
+    const chat = await createChatSession(ai, history);
+    const stream = await chat.sendMessageStream({ message });
 
-    const chatHistory = (history || []).map((h: any) => ({
-      role: h.role === 'user' ? 'user' : 'model',
-      parts: [{ text: h.content }]
-    }));
+    let streamed = '';
+    for await (const chunk of stream) {
+      if (aborted) break;
+      const delta = chunk.text;
+      if (delta) {
+        streamed += delta;
+        send({ delta, source: 'gemini' });
+      }
+    }
 
-    const chat = ai.chats.create({
-      model: 'gemini-3.6-flash',
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.4
-      },
-      history: chatHistory
-    });
-
-    const response = await chat.sendMessage({ message });
-    return res.json({
-      reply: response.text,
-      widget: null
-    });
+    if (!aborted) {
+      if (!streamed.trim()) {
+        // Empty model output → fall back to live-data answer instead of failing hard.
+        await streamLocalReply(message, send, () => aborted);
+      } else {
+        send({ done: true, source: 'gemini' });
+      }
+    }
+    res.end();
   } catch (e: any) {
-    console.error('Chat error:', e);
-    return res.status(500).json({ error: 'AI Assistant error' });
+    console.error('[AI] Chat stream error:', e?.message || e);
+    if (!aborted) {
+      try {
+        await streamLocalReply(message, send, () => aborted);
+      } catch {
+        send({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
+        send({ done: true });
+      }
+    }
+    res.end();
+  }
+});
+
+/**
+ * Non-streaming chat endpoint. Kept as the client's fallback for environments
+ * where the SSE body cannot be read incrementally.
+ */
+app.post('/api/chat', async (req, res) => {
+  const { message, history } = req.body;
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Message required' });
+  }
+
+  const ai = getGenAI();
+  if (!ai) {
+    try {
+      const reply = await buildLocalChatReply(message);
+      return res.json({ reply, degraded: false, source: 'local' });
+    } catch (e: any) {
+      console.error('[AI] Local chat error:', e?.message || e);
+      return res.status(502).json({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
+    }
+  }
+
+  try {
+    const chat = await createChatSession(ai, history);
+    const response = await chat.sendMessage({ message });
+    const reply = (response.text || '').trim();
+    if (!reply) {
+      const local = await buildLocalChatReply(message);
+      return res.json({ reply: local, degraded: false, source: 'local' });
+    }
+
+    return res.json({ reply, degraded: false, source: 'gemini' });
+  } catch (e: any) {
+    console.error('[AI] Chat error:', e?.message || e);
+    try {
+      const local = await buildLocalChatReply(message);
+      return res.json({ reply: local, degraded: false, source: 'local' });
+    } catch {
+      return res.status(502).json({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
+    }
   }
 });
 
@@ -531,6 +585,7 @@ async function startServer() {
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Black Swan Server running on http://localhost:${PORT}`);
+    logGeminiKeyStatus(ENV_FILE_PATH);
     initImpactService();
     startImpactCron();
     startImpactPricePolling(30_000);

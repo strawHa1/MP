@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Briefcase,
   TrendingUp,
@@ -12,9 +12,8 @@ import {
   BarChart2,
   Sliders
 } from 'lucide-react';
-import { ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip } from 'recharts';
 import { CompanyRisk, PortfolioHolding } from '../../types';
-import { INITIAL_PORTFOLIO } from '../../data/mockData';
+import { getHoldings, PORTFOLIO_UPDATED_EVENT } from '../../lib/portfolioService';
 import { LiveStockPrice } from '../common/LiveStockPrice';
 import { computeInvestmentRiskSignal } from '../../utils/riskSignal';
 
@@ -35,11 +34,20 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
   initialReviewTicker = '',
   initialAction = ''
 }) => {
-  const holdings: PortfolioHolding[] = INITIAL_PORTFOLIO;
+  // Holdings come from portfolioService so trades executed in the AI Assistant
+  // chat are reflected here; it seeds from INITIAL_PORTFOLIO until the first trade.
+  const [holdings, setHoldings] = useState<PortfolioHolding[]>(getHoldings);
   const [selectedReviewTicker, setSelectedReviewTicker] = useState<string | null>(
     initialReviewTicker ? initialReviewTicker.toUpperCase() : null
   );
   const reviewRowRef = useRef<HTMLTableRowElement | null>(null);
+
+  // State is seeded lazily above, so only subscribe to later updates here.
+  useEffect(() => {
+    const sync = () => setHoldings(getHoldings());
+    window.addEventListener(PORTFOLIO_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(PORTFOLIO_UPDATED_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (initialReviewTicker) {
@@ -62,10 +70,25 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
     holdings.reduce((sum, h) => sum + h.riskScore * h.allocationPct, 0) / 100
   );
 
-  const pieData = holdings.map((h) => ({
-    name: h.ticker,
-    value: h.allocationPct
-  }));
+  const pieData = useMemo(
+    () => holdings.map((h) => ({ name: h.ticker, value: h.allocationPct })),
+    [holdings]
+  );
+
+  // Builds the allocation ring as a single conic-gradient, one colour band per
+  // holding sized by its allocation percentage.
+  const donutGradient = useMemo(() => {
+    const total = pieData.reduce((sum, d) => sum + d.value, 0);
+    if (total <= 0) return '#232A3D';
+    let cursor = 0;
+    const bands = pieData.map((d, idx) => {
+      const start = (cursor / total) * 100;
+      cursor += d.value;
+      const end = (cursor / total) * 100;
+      return `${COLORS[idx % COLORS.length]} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+    });
+    return `conic-gradient(${bands.join(', ')})`;
+  }, [pieData]);
 
   // Identify any holding that triggers capital loss warning based on userRiskTolerance
   const flaggedHoldings = holdings.map((h) => {
@@ -104,10 +127,11 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
         </div>
 
         <button
-          onClick={() => onNavigate('/simulations')}
+          type="button"
+          onClick={() => onNavigate('/reports')}
           className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 shrink-0"
         >
-          Stress Test Portfolio →
+          Generate Risk Report →
         </button>
       </div>
 
@@ -189,8 +213,8 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
           <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-2">
             Buy TSM 60-Day Out-Of-The-Money Put Options
           </div>
-          <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 font-semibold cursor-pointer hover:underline" onClick={() => onNavigate('/simulations')}>
-            Run Hedging Scenario Simulation →
+          <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 font-semibold cursor-pointer hover:underline" onClick={() => onNavigate('/portfolio?review=TSM&action=hedge')}>
+            Review TSM Hedge Plan →
           </div>
         </div>
       </div>
@@ -292,7 +316,7 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
         </div>
 
         {/* Allocation Donut Chart */}
-        <div className="bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] p-6 rounded-2xl shadow-sm dark:shadow-xl flex flex-col items-center justify-between">
+        <div className="bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] p-6 rounded-2xl shadow-sm dark:shadow-xl">
           <div className="w-full text-left">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
               <PieChart className="w-4 h-4 text-purple-600 dark:text-purple-400" /> Sector Weight Allocation
@@ -300,25 +324,25 @@ export const PortfolioRiskPage: React.FC<PortfolioRiskPageProps> = ({
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Asset distribution by ticker</p>
           </div>
 
-          <div className="h-56 w-full my-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <RePieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#161B2C', borderColor: '#232A3D', borderRadius: '12px', color: '#FFF' }} />
-              </RePieChart>
-            </ResponsiveContainer>
+          {/* CSS conic-gradient donut. Recharts' polar charts (Pie) drive React 19
+              into a "Maximum update depth exceeded" loop that blanked this page, so
+              the allocation ring is rendered directly instead. */}
+          <div className="h-56 w-full my-4 flex items-center justify-center">
+            <div
+              className="relative w-40 h-40 rounded-full shadow-inner"
+              style={{ background: donutGradient }}
+              role="img"
+              aria-label="Portfolio allocation by ticker"
+            >
+              <div className="absolute inset-[26%] rounded-full bg-white dark:bg-[#0F1420] flex flex-col items-center justify-center">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">
+                  Positions
+                </span>
+                <span className="text-xl font-black font-mono text-slate-900 dark:text-white">
+                  {holdings.length}
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="w-full space-y-1.5 text-xs font-mono text-slate-700 dark:text-slate-300">

@@ -5,7 +5,6 @@ import {
   Building2,
   PieChart,
   Map,
-  FileSpreadsheet,
   Cpu,
   Briefcase,
   ShieldAlert,
@@ -40,7 +39,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { label: 'Company Explorer', path: '/companies', icon: Building2 },
     { label: 'Sector Explorer', path: '/sectors', icon: Cpu },
     { label: 'World Risk Map', path: '/map', icon: Map },
-    { label: 'AI Simulations', path: '/simulations', icon: FileSpreadsheet, highlight: true },
     { label: 'AI Reports', path: '/reports', icon: Globe2 },
     { label: 'Portfolio Risk', path: '/portfolio', icon: Briefcase },
     { label: 'Alerts Center', path: '/alerts', icon: ShieldAlert, count: unreadAlertsCount }
@@ -107,9 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {item.count}
                   </span>
                 ) : null}
-                {item.highlight && !isActive && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
-                )}
               </div>
             </button>
           );

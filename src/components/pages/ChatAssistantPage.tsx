@@ -1,174 +1,722 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot,
   Send,
   User,
-  Zap,
   Sparkles,
   RefreshCw,
-  Building2,
-  Flame,
-  FileSpreadsheet
+  AlertTriangle,
+  RotateCcw,
+  Wallet,
+  Loader2
 } from 'lucide-react';
 import { ChatMessage } from '../../types';
+import { MarkdownMessage } from '../chat/MarkdownMessage';
+import { TradeConfirmationCard, TradeConfirmationData } from '../chat/TradeConfirmationCard';
+import { TradeReceiptCard, TradeReceiptData } from '../chat/TradeReceiptCard';
+import { AlertCreatedCard, AlertCreatedData } from '../chat/AlertCreatedCard';
+import { parseChatIntent, resolveTicker, TradeIntent, AlertIntent } from '../../lib/chatIntentParser';
+import {
+  executeTrade,
+  getCashBalance,
+  getHolding,
+  PORTFOLIO_UPDATED_EVENT
+} from '../../lib/portfolioService';
+import { createUserAlert, describeUserAlert, removeUserAlert } from '../../lib/alertsService';
 
 interface ChatAssistantPageProps {
   onNavigate: (path: string) => void;
 }
 
+const SESSION_KEY = 'bs-chat-session';
+
 const PROMPT_SUGGESTIONS = [
   'Summarize Taiwan Strait risk for NVDA & TSM',
-  'Simulate 20% crude oil shock on airline sector',
-  'Generate 1-page risk brief on Panama Canal draft cuts',
-  'What are top 3 risks for ASML semiconductor supply chain?'
+  'What are the top 3 risks for ASML?',
+  'Generate a 1-page risk brief on Panama Canal draft cuts',
+  'Invest $5,000 in NVDA',
+  'Alert me if TSM drops below $150'
 ];
 
+const WELCOME_MESSAGE: ChatMessage = {
+  id: 'msg-welcome',
+  sender: 'assistant',
+  text:
+    'Hello John. I am **Black Swan AI**, your financial risk intelligence assistant.\n\n' +
+    'I can help you with:\n' +
+    '- **Risk analysis** — geopolitical events, supply chain chokepoints, ticker exposure\n' +
+    '- **Trading** — e.g. `Invest $5,000 in NVDA` or `Withdraw $2,000 from TSM`\n' +
+    '- **Alerts** — e.g. `Alert me if TSM drops below $150`\n\n' +
+    'Trades always require your explicit confirmation before anything is executed.',
+  timestamp: 'Just now'
+};
+
+const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+const money = (value: number) =>
+  `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Restores the previous session. Any trade card left pending from a previous
+ * visit is marked cancelled, because its quoted price is no longer current and
+ * must never be executed against a stale quote.
+ */
+function loadSession(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return [WELCOME_MESSAGE];
+    const parsed = JSON.parse(raw) as ChatMessage[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return [WELCOME_MESSAGE];
+    return parsed.map((msg) =>
+      msg.widget?.type === 'tradeConfirmation' && msg.widget.data?.status === 'pending'
+        ? { ...msg, widget: { ...msg.widget, data: { ...msg.widget.data, status: 'cancelled' } } }
+        : msg
+    );
+  } catch {
+    return [WELCOME_MESSAGE];
+  }
+}
+
+/** Best-effort current score for a named risk index, used for alert context. */
+async function lookupRiskScore(subject: string): Promise<number | undefined> {
+  try {
+    const res = await fetch('/api/countries/risk', { cache: 'no-store' });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    const rows: any[] = Array.isArray(data) ? data : data.countries || [];
+    const needle = subject.toLowerCase();
+    const match = rows.find((r) => {
+      const name = String(r.name || r.country || '').toLowerCase();
+      return name && (name.includes(needle) || needle.includes(name));
+    });
+    const score = Number(match?.riskScore ?? match?.score);
+    return Number.isFinite(score) ? score : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'msg-1',
-      sender: 'assistant',
-      text: 'Hello John. I am **Black Swan AI**, your financial risk intelligence assistant. Ask me about geopolitical events, supply chain chokepoints, or run scenario shocks across your portfolio.',
-      timestamp: 'Just now'
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadSession);
   const [inputQuery, setInputQuery] = useState('');
   const [thinking, setThinking] = useState(false);
+  /** Id of the bubble currently receiving stream tokens, if any. */
+  const [streamingId, setStreamingId] = useState<string | null>(null);
+  const [busyTradeId, setBusyTradeId] = useState<string | null>(null);
+  const [failedPrompt, setFailedPrompt] = useState<string | null>(null);
+  const [degraded, setDegraded] = useState(false);
+  const [cashBalance, setCashBalance] = useState(0);
 
-  const handleSendMessage = async (queryText?: string) => {
-    const textToSend = queryText || inputQuery;
-    if (!textToSend.trim()) return;
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text: textToSend,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    if (!queryText) setInputQuery('');
-    setThinking(true);
-
+  // Persist the transcript so the conversation survives reloads. Skipped mid-stream
+  // to avoid a localStorage write for every token.
+  useEffect(() => {
+    if (streamingId) return;
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: textToSend, history: messages })
+      localStorage.setItem(SESSION_KEY, JSON.stringify(messages.slice(-60)));
+    } catch {
+      /* quota exceeded — the session simply won't persist */
+    }
+  }, [messages, streamingId]);
+
+  // Follow the newest content. Smooth scrolling per token looks jittery, so the
+  // instant behaviour is used while a reply is streaming in.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: streamingId ? 'auto' : 'smooth',
+      block: 'end'
+    });
+  }, [messages, thinking, streamingId]);
+
+  // Keep the header cash figure in sync with trades made here or elsewhere.
+  useEffect(() => {
+    const sync = () => setCashBalance(getCashBalance());
+    sync();
+    window.addEventListener(PORTFOLIO_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(PORTFOLIO_UPDATED_EVENT, sync);
+  }, []);
+
+  const pushMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+    const full: ChatMessage = {
+      ...message,
+      id: `${message.sender}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: now()
+    };
+    setMessages((prev) => [...prev, full]);
+    return full;
+  }, []);
+
+  const pushAssistantError = useCallback(
+    (text: string, retryPrompt?: string) => {
+      pushMessage({ sender: 'assistant', text, status: 'error' });
+      setFailedPrompt(retryPrompt ?? null);
+    },
+    [pushMessage]
+  );
+
+  /**
+   * Streams a reply from the Gemini-backed SSE endpoint, appending each token to a
+   * single assistant bubble so the answer materialises like ChatGPT. Falls back to
+   * the non-streaming /api/chat endpoint if the response body cannot be read
+   * incrementally.
+   */
+  const askAssistant = useCallback(
+    async (text: string, history: ChatMessage[]) => {
+      // Widgets and error bubbles are UI-only, so they are excluded from the
+      // context sent upstream; everything else preserves conversation memory.
+      const payload = {
+        message: text,
+        history: history.filter((m) => m.status !== 'error' && !m.widget)
+      };
+      const streamId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      const appendDelta = (delta: string) => {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === streamId)) {
+            return prev.map((m) => (m.id === streamId ? { ...m, text: m.text + delta } : m));
+          }
+          return [
+            ...prev,
+            { id: streamId, sender: 'assistant', text: delta, timestamp: now(), status: 'ok' }
+          ];
+        });
+      };
+
+      setThinking(true);
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || 'Something went wrong, please try again.');
+        }
+
+        if (!response.body) {
+          // Environment cannot stream — take the whole reply in one shot instead.
+          const fallback = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!fallback.ok) {
+            const body = await fallback.json().catch(() => ({}));
+            throw new Error(body.error || 'Something went wrong, please try again.');
+          }
+          const data = await fallback.json();
+          setDegraded(Boolean(data.degraded));
+          pushMessage({ sender: 'assistant', text: data.reply, status: 'ok' });
+          setFailedPrompt(null);
+          return;
+        }
+
+        setStreamingId(streamId);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamError: string | null = null;
+        let receivedAny = false;
+        let isDegraded = false;
+
+        // SSE frames are separated by a blank line; a frame may straddle chunks,
+        // so the trailing partial frame stays in the buffer until it completes.
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() ?? '';
+
+          for (const frame of frames) {
+            const line = frame.trim();
+            if (!line.startsWith('data:')) continue;
+            let event: any;
+            try {
+              event = JSON.parse(line.slice(5).trim());
+            } catch {
+              continue;
+            }
+            if (event.degraded) isDegraded = true;
+            if (event.error) streamError = event.error;
+            if (typeof event.delta === 'string' && event.delta.length > 0) {
+              receivedAny = true;
+              setThinking(false);
+              appendDelta(event.delta);
+            }
+          }
+        }
+
+        setDegraded(isDegraded);
+        if (streamError) throw new Error(streamError);
+        if (!receivedAny) throw new Error('The assistant returned an empty response.');
+        setFailedPrompt(null);
+      } catch (err: any) {
+        console.error('Chat AI error:', err);
+        // Discard any partial text so a half-finished answer isn't left behind.
+        setMessages((prev) => prev.filter((m) => m.id !== streamId));
+        pushAssistantError(
+          `**Something went wrong, please try again.**\n\n${
+            err?.message || 'The assistant could not be reached.'
+          }`,
+          text
+        );
+      } finally {
+        setStreamingId(null);
+        setThinking(false);
+      }
+    },
+    [pushMessage, pushAssistantError]
+  );
+
+  /**
+   * Invest / withdraw: resolves a live price, validates the order up front, and
+   * then renders a pending confirmation card. Nothing is executed at this stage.
+   */
+  const handleTradeIntent = useCallback(
+    async (intent: TradeIntent) => {
+      setThinking(true);
+      const resolved = await resolveTicker(intent.ticker);
+      setThinking(false);
+
+      if (!resolved) {
+        pushAssistantError(
+          `I could not find a listed security with the ticker **$${intent.ticker}**. ` +
+            'Please check the symbol and try again — for example `Invest $5,000 in NVDA`.'
+        );
+        return;
+      }
+      if (!Number.isFinite(intent.amount) || intent.amount <= 0) {
+        pushAssistantError('Please specify an amount greater than **$0**.');
+        return;
+      }
+
+      const cash = getCashBalance();
+      const holding = getHolding(resolved.symbol);
+      const positionValue = (holding?.shares || 0) * resolved.price;
+
+      // Surface funding / position problems before showing a Confirm button.
+      if (intent.action === 'invest' && intent.amount > cash) {
+        pushAssistantError(
+          `**Insufficient funds.** Investing ${money(intent.amount)} in $${resolved.symbol} is not ` +
+            `possible — your available cash balance is ${money(cash)}.`
+        );
+        return;
+      }
+      if (intent.action === 'withdraw') {
+        if (!holding) {
+          pushAssistantError(
+            `You do not currently hold any **$${resolved.symbol}**, so there is nothing to withdraw.`
+          );
+          return;
+        }
+        if (intent.amount > positionValue) {
+          pushAssistantError(
+            `**Amount exceeds position.** Your $${resolved.symbol} holding is worth ` +
+              `${money(positionValue)} at ${money(resolved.price)}/share, so ${money(intent.amount)} ` +
+              'cannot be withdrawn.'
+          );
+          return;
+        }
+      }
+
+      const data: TradeConfirmationData = {
+        action: intent.action,
+        ticker: resolved.symbol,
+        companyName: resolved.name,
+        amount: intent.amount,
+        price: resolved.price,
+        shares: Number((intent.amount / resolved.price).toFixed(4)),
+        cashBalance: cash,
+        positionValue,
+        status: 'pending'
+      };
+
+      pushMessage({
+        sender: 'assistant',
+        text: `Please review and confirm this ${
+          intent.action === 'invest' ? 'investment' : 'withdrawal'
+        } request.`,
+        widget: { type: 'tradeConfirmation', data }
+      });
+    },
+    [pushMessage, pushAssistantError]
+  );
+
+  /** Executes the order only after the user presses Confirm on the card. */
+  const handleConfirmTrade = useCallback(
+    (messageId: string, data: TradeConfirmationData) => {
+      setBusyTradeId(messageId);
+      const result = executeTrade({
+        action: data.action,
+        ticker: data.ticker,
+        companyName: data.companyName,
+        amount: data.amount,
+        price: data.price
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const aiMsg: ChatMessage = {
-          id: `ai-${Date.now()}`,
-          sender: 'assistant',
-          text: data.reply,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages((prev) => [...prev, aiMsg]);
-      } else {
-        // Fallback response
-        const fallbackMsg: ChatMessage = {
-          id: `ai-${Date.now()}`,
-          sender: 'assistant',
-          text: `Analysis complete for: "${textToSend}". Key risk drivers indicate heightened maritime freight premiums and sub-30 day supply buffer constraints for Asia-Pacific hardware exports.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages((prev) => [...prev, fallbackMsg]);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId && msg.widget
+            ? {
+                ...msg,
+                widget: {
+                  ...msg.widget,
+                  data: { ...data, status: result.ok ? 'confirmed' : 'cancelled' }
+                }
+              }
+            : msg
+        )
+      );
+      setBusyTradeId(null);
+
+      if (!result.ok || !result.transaction) {
+        pushAssistantError(`**Order rejected.** ${result.error || 'Please try again.'}`);
+        return;
       }
-    } catch (err) {
-      console.error('Chat AI error:', err);
-    } finally {
-      setThinking(false);
+
+      const receipt: TradeReceiptData = {
+        transaction: result.transaction,
+        remainingShares: result.holding?.shares ?? 0,
+        allocationPct: result.holding?.allocationPct ?? 0
+      };
+
+      pushMessage({
+        sender: 'assistant',
+        text:
+          data.action === 'invest'
+            ? `Done — ${money(data.amount)} invested in **$${data.ticker}**.`
+            : `Done — ${money(data.amount)} withdrawn from **$${data.ticker}**.`,
+        widget: { type: 'tradeReceipt', data: receipt }
+      });
+    },
+    [pushMessage, pushAssistantError]
+  );
+
+  const handleCancelTrade = useCallback(
+    (messageId: string, data: TradeConfirmationData) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId && msg.widget
+            ? { ...msg, widget: { ...msg.widget, data: { ...data, status: 'cancelled' } } }
+            : msg
+        )
+      );
+      pushMessage({
+        sender: 'assistant',
+        text: `No problem — the ${data.action === 'invest' ? 'investment' : 'withdrawal'} for **$${
+          data.ticker
+        }** was cancelled and nothing was executed.`
+      });
+    },
+    [pushMessage]
+  );
+
+  /**
+   * Alerts: validated, saved through alertsService, and immediately visible in
+   * the Alerts Center via the shared storage event.
+   */
+  const handleAlertIntent = useCallback(
+    async (intent: AlertIntent) => {
+      setThinking(true);
+      let referenceValue: number | undefined;
+
+      if (intent.subjectType === 'stock') {
+        const resolved = await resolveTicker(intent.subject);
+        setThinking(false);
+        if (!resolved) {
+          pushAssistantError(
+            `I could not find a listed security with the ticker **$${intent.subject}**, so I did not ` +
+              'create that alert. Try `Alert me if TSM drops below $150`.'
+          );
+          return;
+        }
+        referenceValue = resolved.price;
+      } else {
+        referenceValue = await lookupRiskScore(intent.subject);
+        setThinking(false);
+      }
+
+      if (!Number.isFinite(intent.threshold) || intent.threshold <= 0) {
+        pushAssistantError('Please give me a threshold greater than **0** for that alert.');
+        return;
+      }
+
+      const alert = createUserAlert({
+        subject: intent.subject,
+        subjectType: intent.subjectType,
+        condition: intent.condition,
+        threshold: intent.threshold,
+        referenceValue
+      });
+
+      const data: AlertCreatedData = { alert };
+      pushMessage({
+        sender: 'assistant',
+        text: `Alert created — I will notify you when **${describeUserAlert(alert)}**. It is now live in your Alerts Center.`,
+        widget: { type: 'alertCreated', data }
+      });
+    },
+    [pushMessage, pushAssistantError]
+  );
+
+  const handleRemoveAlert = useCallback((messageId: string, data: AlertCreatedData) => {
+    removeUserAlert(data.alert.id);
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId && msg.widget
+          ? { ...msg, widget: { ...msg.widget, data: { ...data, removed: true } } }
+          : msg
+      )
+    );
+  }, []);
+
+  /** Entry point for the input bar, Enter key, and the quick-reply chips. */
+  const handleSendMessage = useCallback(
+    async (queryText?: string) => {
+      const textToSend = (queryText ?? inputQuery).trim();
+      if (!textToSend || thinking) return;
+
+      const history = messages;
+      pushMessage({ sender: 'user', text: textToSend });
+      setInputQuery('');
+      setFailedPrompt(null);
+
+      // Trade and alert commands are handled locally so they stay deterministic
+      // and always route through an explicit confirmation step.
+      const intent = parseChatIntent(textToSend);
+      if (intent.kind === 'trade') {
+        await handleTradeIntent(intent);
+        return;
+      }
+      if (intent.kind === 'alert') {
+        await handleAlertIntent(intent);
+        return;
+      }
+
+      await askAssistant(textToSend, history);
+    },
+    [inputQuery, thinking, messages, pushMessage, handleTradeIntent, handleAlertIntent, askAssistant]
+  );
+
+  const handleRetry = useCallback(() => {
+    if (!failedPrompt) return;
+    const prompt = failedPrompt;
+    setFailedPrompt(null);
+    // Drop the failed bubble so the retry reads as a single clean exchange.
+    setMessages((prev) => prev.filter((m) => m.status !== 'error'));
+    askAssistant(prompt, messages.filter((m) => m.status !== 'error'));
+  }, [failedPrompt, messages, askAssistant]);
+
+  const handleReset = useCallback(() => {
+    setMessages([{ ...WELCOME_MESSAGE, timestamp: 'Just now' }]);
+    setInputQuery('');
+    setFailedPrompt(null);
+    setThinking(false);
+    setStreamingId(null);
+    localStorage.removeItem(SESSION_KEY);
+    inputRef.current?.focus();
+  }, []);
+
+  const renderWidget = (msg: ChatMessage) => {
+    if (!msg.widget) return null;
+    switch (msg.widget.type) {
+      case 'tradeConfirmation':
+        return (
+          <TradeConfirmationCard
+            data={msg.widget.data as TradeConfirmationData}
+            busy={busyTradeId === msg.id}
+            onConfirm={() => handleConfirmTrade(msg.id, msg.widget!.data as TradeConfirmationData)}
+            onCancel={() => handleCancelTrade(msg.id, msg.widget!.data as TradeConfirmationData)}
+          />
+        );
+      case 'tradeReceipt':
+        return (
+          <TradeReceiptCard
+            data={msg.widget.data as TradeReceiptData}
+            onViewPortfolio={() => onNavigate('/portfolio')}
+          />
+        );
+      case 'alertCreated':
+        return (
+          <AlertCreatedCard
+            data={msg.widget.data as AlertCreatedData}
+            onViewAlerts={() => onNavigate('/alerts')}
+            onRemove={() => handleRemoveAlert(msg.id, msg.widget!.data as AlertCreatedData)}
+          />
+        );
+      default:
+        return null;
     }
   };
 
+  const lastMessage = messages[messages.length - 1];
+  const showRetry = Boolean(failedPrompt) && lastMessage?.status === 'error';
+
   return (
-    <div className="p-6 h-[calc(100vh-4rem)] max-w-5xl mx-auto flex flex-col font-sans space-y-4">
+    <div className="p-4 sm:p-6 h-[calc(100vh-4rem)] max-w-5xl mx-auto flex flex-col font-sans gap-3 sm:gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-[#232A3D]">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-blue-600 flex items-center justify-center text-white shadow-lg">
+      <div className="flex items-center justify-between gap-3 pb-3 sm:pb-4 border-b border-slate-200 dark:border-[#232A3D]">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-600 to-blue-600 flex items-center justify-center text-white shadow-lg shrink-0">
             <Bot className="w-5 h-5" />
           </div>
-          <div>
-            <h1 className="text-lg font-extrabold text-white tracking-tight flex items-center gap-2">
-              Black Swan AI Assistant
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+              <span className="truncate">Black Swan AI Assistant</span>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  degraded ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'
+                }`}
+              />
             </h1>
-            <p className="text-xs text-slate-400">Powered by server-side Gemini AI Reasoning Engine</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+              Live risk intelligence · trading & alerts
+            </p>
           </div>
         </div>
 
-        <button
-          onClick={() => setMessages([messages[0]])}
-          className="p-2 rounded-xl bg-[#0F1420] border border-[#232A3D] text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1.5"
-          title="Clear Conversation"
-        >
-          <RefreshCw className="w-3.5 h-3.5" /> Reset
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] text-[11px] font-mono">
+            <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="text-slate-700 dark:text-slate-300">{money(cashBalance)}</span>
+          </div>
+          <button
+            onClick={handleReset}
+            className="p-2 rounded-xl bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            title="Clear conversation and start a fresh session"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset</span>
+          </button>
+        </div>
       </div>
 
-      {/* Message History Container */}
-      <div className="flex-1 overflow-y-auto space-y-4 p-4 rounded-2xl bg-[#0F1420] border border-[#232A3D] custom-scrollbar">
+      {degraded && (
+        <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 text-[11px] text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+          <span>
+            Gemini LLM is offline (<code className="font-mono">GEMINI_API_KEY</code> missing). Answers
+            still use live portfolio & impact data. Trade and alert commands work as usual.
+          </span>
+        </div>
+      )}
+
+      {/* Message history */}
+      <div className="flex-1 overflow-y-auto space-y-4 p-3 sm:p-4 rounded-2xl bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] custom-scrollbar">
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex gap-2 sm:gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             {msg.sender === 'assistant' && (
-              <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0">
-                <Bot className="w-4 h-4" />
+              <div
+                className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                  msg.status === 'error'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+                    : 'bg-purple-600/10 border-purple-500/30 text-purple-600 dark:text-purple-400'
+                }`}
+              >
+                {msg.status === 'error' ? (
+                  <AlertTriangle className="w-4 h-4" />
+                ) : (
+                  <Bot className="w-4 h-4" />
+                )}
               </div>
             )}
 
             <div
-              className={`max-w-xl p-4 rounded-2xl text-xs leading-relaxed space-y-1 ${
+              className={`max-w-[85%] sm:max-w-xl p-3 sm:p-4 rounded-2xl shadow-sm ${
                 msg.sender === 'user'
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none shadow-md font-medium'
-                  : 'bg-[#161B2C] border border-[#232A3D] text-slate-200 rounded-bl-none shadow-md'
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-br-none font-medium'
+                  : msg.status === 'error'
+                  ? 'bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/40 text-rose-900 dark:text-rose-200 rounded-bl-none'
+                  : 'bg-slate-50 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] text-slate-800 dark:text-slate-200 rounded-bl-none'
               }`}
             >
-              <div className="whitespace-pre-line">{msg.text}</div>
-              <div className={`text-[9px] font-mono mt-1 ${msg.sender === 'user' ? 'text-blue-100 text-right' : 'text-slate-500'}`}>
+              {msg.sender === 'user' ? (
+                <div className="text-xs leading-relaxed whitespace-pre-wrap break-words">{msg.text}</div>
+              ) : (
+                <>
+                  <MarkdownMessage content={msg.text} />
+                  {streamingId === msg.id && (
+                    <span className="inline-block w-1.5 h-3 -mb-0.5 bg-purple-500 animate-pulse rounded-sm" />
+                  )}
+                </>
+              )}
+
+              {renderWidget(msg)}
+
+              <div
+                className={`text-[9px] font-mono mt-1.5 ${
+                  msg.sender === 'user' ? 'text-blue-100 text-right' : 'text-slate-400 dark:text-slate-500'
+                }`}
+              >
                 {msg.timestamp}
               </div>
             </div>
 
             {msg.sender === 'user' && (
-              <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-blue-600/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                 <User className="w-4 h-4" />
               </div>
             )}
           </div>
         ))}
 
+        {/* Typing indicator */}
         {thinking && (
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-400 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 animate-spin" />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 rounded-xl bg-purple-600/10 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 animate-pulse" />
             </div>
-            <div className="bg-[#161B2C] border border-[#232A3D] px-4 py-3 rounded-2xl text-xs text-slate-400 font-mono animate-pulse">
-              Synthesizing real-time market data & geopolitical intelligence...
+            <div className="bg-slate-50 dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] px-4 py-3 rounded-2xl rounded-bl-none flex items-center gap-2">
+              <span className="flex gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-bounce" />
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                Analyzing market & risk data…
+              </span>
             </div>
           </div>
         )}
+
+        {showRetry && (
+          <div className="flex justify-start pl-10 sm:pl-11">
+            <button
+              onClick={handleRetry}
+              className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#0F1420] border border-slate-300 dark:border-[#232A3D] text-slate-700 dark:text-slate-300 text-[11px] font-bold hover:border-slate-400 transition-all flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3 h-3" /> Retry
+            </button>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Prompt Suggestions */}
-      <div className="flex items-center gap-2 overflow-x-auto py-1 custom-scrollbar">
-        {PROMPT_SUGGESTIONS.map((sug) => (
+      {/* Quick-reply chips — each fires a real query */}
+      <div className="flex items-center gap-2 overflow-x-auto py-0.5 custom-scrollbar">
+        {PROMPT_SUGGESTIONS.map((suggestion) => (
           <button
-            key={sug}
-            onClick={() => handleSendMessage(sug)}
-            className="text-[11px] bg-[#0F1420] hover:bg-[#161B2C] text-slate-300 border border-[#232A3D] hover:border-slate-500 px-3 py-1.5 rounded-xl shrink-0 transition-colors"
+            key={suggestion}
+            onClick={() => handleSendMessage(suggestion)}
+            disabled={thinking}
+            className="text-[11px] bg-white dark:bg-[#0F1420] hover:bg-slate-50 dark:hover:bg-[#161B2C] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#232A3D] hover:border-slate-400 px-3 py-1.5 rounded-xl shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {sug}
+            {suggestion}
           </button>
         ))}
       </div>
 
-      {/* Input Bar */}
+      {/* Input bar */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -177,19 +725,29 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
         className="flex gap-2"
       >
         <input
+          ref={inputRef}
           type="text"
           value={inputQuery}
           onChange={(e) => setInputQuery(e.target.value)}
-          placeholder="Ask Black Swan AI about any event, company, or market risk..."
-          className="flex-1 bg-[#0F1420] border border-[#232A3D] rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono transition-colors"
+          onKeyDown={(e) => {
+            // Explicit Enter handling so submitting never depends on the browser's
+            // implicit form submission (which is skipped when Send is disabled).
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSendMessage();
+            }
+          }}
+          placeholder="Ask about a risk, or try “Invest $5,000 in NVDA”…"
+          aria-label="Message Black Swan AI"
+          className="flex-1 min-w-0 bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] rounded-xl px-4 py-3 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
         />
-
         <button
           type="submit"
           disabled={thinking || !inputQuery.trim()}
-          className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-500/20 transition-all flex items-center justify-center shrink-0 disabled:opacity-50"
+          aria-label="Send message"
+          className="px-4 sm:px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-purple-500/20 transition-all flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Send className="w-4 h-4" />
+          {thinking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
       </form>
     </div>

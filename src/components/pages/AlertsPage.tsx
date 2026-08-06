@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldAlert,
   CheckCircle2,
@@ -7,11 +7,21 @@ import {
   Filter,
   Check,
   Sliders,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { AlertItem } from '../../types';
 import { INITIAL_ALERTS } from '../../data/mockData';
 import { SeverityBadge } from '../common/SeverityBadge';
+import {
+  getUserAlerts,
+  removeUserAlert,
+  toAlertItem,
+  USER_ALERTS_UPDATED_EVENT
+} from '../../lib/alertsService';
+
+/** Alerts created by the user in the AI Assistant chat carry this id prefix. */
+const isCustomAlert = (id: string) => id.startsWith('ua-');
 
 interface AlertsPageProps {
   onNavigate: (path: string) => void;
@@ -37,6 +47,31 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
   ]);
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
 
+  // Merge in alerts the user created from the AI Assistant chat. The service
+  // fires USER_ALERTS_UPDATED_EVENT so new alerts appear without a reload.
+  useEffect(() => {
+    const sync = () => {
+      const customItems = getUserAlerts().map(toAlertItem);
+      setAlerts((prev) => {
+        const readState = new Map(prev.map((a) => [a.id, a.read]));
+        const platformAlerts = prev.filter((a) => !isCustomAlert(a.id));
+        return [
+          ...customItems.map((item) => ({ ...item, read: readState.get(item.id) ?? item.read })),
+          ...platformAlerts
+        ];
+      });
+    };
+
+    sync();
+    window.addEventListener(USER_ALERTS_UPDATED_EVENT, sync);
+    return () => window.removeEventListener(USER_ALERTS_UPDATED_EVENT, sync);
+  }, []);
+
+  const deleteCustomAlert = (id: string) => {
+    removeUserAlert(id);
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
+  };
+
   const markAllRead = () => {
     setAlerts(alerts.map((a) => ({ ...a, read: true })));
   };
@@ -49,8 +84,11 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
     if (filterSeverity === 'unread') return !a.read;
     if (filterSeverity === 'critical') return a.severity === 'critical';
     if (filterSeverity === 'high') return a.severity === 'high';
+    if (filterSeverity === 'custom') return isCustomAlert(a.id);
     return true;
   });
+
+  const customAlertCount = alerts.filter((a) => isCustomAlert(a.id)).length;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
@@ -82,7 +120,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
           { id: 'all', label: 'All Notifications' },
           { id: 'unread', label: 'Unread Only' },
           { id: 'critical', label: 'Critical Severity' },
-          { id: 'high', label: 'High Severity' }
+          { id: 'high', label: 'High Severity' },
+          { id: 'custom', label: `My Alerts${customAlertCount ? ` (${customAlertCount})` : ''}` }
         ].map((pill) => (
           <button
             key={pill.id}
@@ -132,6 +171,15 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
                 >
                   <CheckCircle2 className={`w-4 h-4 ${alt.read ? 'text-emerald-600 dark:text-emerald-400' : ''}`} />
                 </button>
+                {isCustomAlert(alt.id) && (
+                  <button
+                    onClick={() => deleteCustomAlert(alt.id)}
+                    className="text-slate-400 hover:text-rose-500"
+                    title="Delete this alert"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 

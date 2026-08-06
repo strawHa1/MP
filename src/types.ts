@@ -234,26 +234,23 @@ export interface ReportItem {
   sections: { heading: string; body: string }[];
 }
 
-export interface SimulationResult {
-  id: string;
-  scenarioText: string;
-  marketImpactPct: number;
-  affectedCompaniesCount: number;
-  recoveryTimeRange: string;
-  probabilityPct: number;
-  aiSummary: string;
-  affectedTickers: { ticker: string; name: string; impactPct: number; riskLevel: string }[];
-  supplyChainRisks: string[];
-  marketImpactTimeline: { day: string; S_AND_P: number; TechSector: number; EnergySector: number }[];
-}
-
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant';
   text: string;
   timestamp: string;
+  /** 'error' renders the bubble in the failure style with a retry affordance. */
+  status?: 'ok' | 'error';
   widget?: {
-    type: 'companyCard' | 'simulationPreview' | 'eventSummary';
+    type:
+      | 'companyCard'
+      | 'eventSummary'
+      /** Pending invest/withdraw order awaiting explicit Confirm / Cancel. */
+      | 'tradeConfirmation'
+      /** Executed trade summary. */
+      | 'tradeReceipt'
+      /** Newly created price / risk alert. */
+      | 'alertCreated';
     data: any;
   };
 }

@@ -8,6 +8,7 @@ import path from 'path';
 import cron from 'node-cron';
 import { GoogleGenAI } from '@google/genai';
 import { fetchHeadlines } from './newsApi.js';
+import { getGeminiApiKey } from './envConfig.js';
 
 export type ImpactSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
@@ -353,7 +354,7 @@ function keywordClassify(news: RawNewsItem): ClassificationResult[] {
 }
 
 async function classifyWithGemini(newsItems: RawNewsItem[]): Promise<Map<string, ClassificationResult[]>> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   const resultMap = new Map<string, ClassificationResult[]>();
   if (!apiKey || newsItems.length === 0) {
     for (const n of newsItems) resultMap.set(n.id, keywordClassify(n));

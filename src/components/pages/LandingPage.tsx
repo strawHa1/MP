@@ -74,7 +74,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
           </h1>
 
           <p className="mt-6 text-lg text-slate-400 max-w-xl leading-relaxed">
-            Black Swan monitors geopolitical conflicts, energy chokepoints, supply chain bottlenecks, and rate shocks in real-time. Score corporate exposure and execute AI scenario simulations before markets react.
+            Black Swan monitors geopolitical conflicts, energy chokepoints, supply chain bottlenecks, and rate shocks in real-time. Score corporate exposure and act on live risk intelligence before markets react.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-4">
@@ -87,11 +87,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
             </button>
 
             <button
-              onClick={() => onNavigate('/simulations')}
+              onClick={() => onNavigate('/reports')}
               className="px-6 py-3.5 rounded-xl bg-[#161B2C] border border-[#232A3D] text-slate-200 hover:text-white hover:border-slate-600 font-semibold text-base transition-all flex items-center gap-2"
             >
               <Play className="w-4 h-4 text-purple-400 fill-purple-400" />
-              Run Live Simulation
+              View AI Reports
             </button>
           </div>
 
@@ -210,9 +210,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
             <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-4">
               <Cpu className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-bold text-white">AI "What-If" Simulations</h3>
+            <h3 className="text-lg font-bold text-white">AI Intelligence Reports</h3>
             <p className="text-slate-400 text-sm mt-2 leading-relaxed">
-              Test custom macroeconomic or conflict scenarios. Receive immediate quantitative market impact timelines, recovery estimates, and ticker shock scores.
+              Generate executive risk briefs from live geopolitical and market data with structured severity tags and mitigation guidance.
             </p>
           </div>
 
@@ -245,7 +245,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
               
               <ul className="mt-6 space-y-3 text-sm text-slate-300">
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> Real-time US equity market quote feeds</li>
-                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> 50 AI "What-If" scenario simulations / mo</li>
+                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> 50 AI intelligence reports / mo</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> Global Threat Heatmap & Sector Explorer</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> PDF Intelligence Report Export</li>
               </ul>
@@ -271,7 +271,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
               <p className="text-slate-400 text-xs mt-2">For multi-asset institutions, central banks, and corporate risk desks.</p>
 
               <ul className="mt-6 space-y-3 text-sm text-slate-300">
-                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-purple-400" /> Unlimited AI Scenario Simulations</li>
+                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-purple-400" /> Unlimited AI Intelligence Reports</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-purple-400" /> Dedicated Black Swan AI Chat Assistant</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-purple-400" /> Custom Portfolio API & SWIFT Integration</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-purple-400" /> 24/7 Priority Intelligence Hotline</li>

@@ -239,18 +239,9 @@ export const InvestmentRiskSignalCard: React.FC<InvestmentRiskSignalCardProps> =
                   setShowModal(false);
                   if (onNavigate) onNavigate('/portfolio');
                 }}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all text-center"
+                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all text-center"
               >
                 Go to Portfolio
-              </button>
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  if (onNavigate) onNavigate('/simulations');
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-slate-200 dark:bg-[#161B2C] hover:bg-slate-300 dark:hover:bg-[#232A3D] text-slate-800 dark:text-slate-200 font-bold text-xs transition-all text-center"
-              >
-                Simulate Hedging
               </button>
             </div>
           </div>
