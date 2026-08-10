@@ -10,6 +10,7 @@ import { fetchHeadlines } from './newsApi.js';
 import { getImpactState } from './impactService.js';
 import { getLiveCountryRisk } from './marketDataService.js';
 import { getGeminiApiKey } from './envConfig.js';
+import { GEMINI_DEFAULT_MODEL } from './geminiClient.js';
 
 export interface PortfolioRow {
   id: string;
@@ -238,7 +239,7 @@ Return JSON:
 Keep the same tickers and factual basis. Max 4 insights, max 4 actions.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: GEMINI_DEFAULT_MODEL,
       contents: prompt,
       config: { responseMimeType: 'application/json', temperature: 0.25 }
     });

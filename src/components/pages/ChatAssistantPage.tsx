@@ -56,10 +56,26 @@ const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '
 const money = (value: number) =>
   `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const STALE_OFFLINE_MARKERS = [
+  'AI reasoning engine is offline',
+  'No `GEMINI_API_KEY` is configured on the server'
+];
+
+function isGeminiConfigError(message: string): boolean {
+  const m = (message || '').toLowerCase();
+  return (
+    m.includes('gemini is not configured') ||
+    m.includes('gemini is offline') ||
+    m.includes('your_key_here') ||
+    m.includes('gemini_api_key')
+  );
+}
+
 /**
  * Restores the previous session. Any trade card left pending from a previous
  * visit is marked cancelled, because its quoted price is no longer current and
- * must never be executed against a stale quote.
+ * must never be executed against a stale quote. Old "Gemini offline" wall
+ * messages are dropped so a fixed server is not masked by cached failures.
  */
 function loadSession(): ChatMessage[] {
   try {
@@ -67,11 +83,14 @@ function loadSession(): ChatMessage[] {
     if (!raw) return [WELCOME_MESSAGE];
     const parsed = JSON.parse(raw) as ChatMessage[];
     if (!Array.isArray(parsed) || parsed.length === 0) return [WELCOME_MESSAGE];
-    return parsed.map((msg) =>
-      msg.widget?.type === 'tradeConfirmation' && msg.widget.data?.status === 'pending'
-        ? { ...msg, widget: { ...msg.widget, data: { ...msg.widget.data, status: 'cancelled' } } }
-        : msg
-    );
+    const cleaned = parsed
+      .filter((msg) => !STALE_OFFLINE_MARKERS.some((m) => (msg.text || '').includes(m)))
+      .map((msg) =>
+        msg.widget?.type === 'tradeConfirmation' && msg.widget.data?.status === 'pending'
+          ? { ...msg, widget: { ...msg.widget, data: { ...msg.widget.data, status: 'cancelled' } } }
+          : msg
+      );
+    return cleaned.length > 0 ? cleaned : [WELCOME_MESSAGE];
   } catch {
     return [WELCOME_MESSAGE];
   }
@@ -106,9 +125,21 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
   const [failedPrompt, setFailedPrompt] = useState<string | null>(null);
   const [degraded, setDegraded] = useState(false);
   const [cashBalance, setCashBalance] = useState(0);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keySaving, setKeySaving] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync offline banner with server key status (env file or runtime configure-key).
+  useEffect(() => {
+    fetch('/api/chat/status')
+      .then((r) => r.json())
+      .then((s) => setDegraded(!s.geminiConfigured))
+      .catch(() => setDegraded(true));
+  }, []);
 
   // Persist the transcript so the conversation survives reloads. Skipped mid-stream
   // to avoid a localStorage write for every token.
@@ -157,15 +188,12 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
   );
 
   /**
-   * Streams a reply from the Gemini-backed SSE endpoint, appending each token to a
-   * single assistant bubble so the answer materialises like ChatGPT. Falls back to
-   * the non-streaming /api/chat endpoint if the response body cannot be read
-   * incrementally.
+   * Streams a reply from /api/chat/stream, appending each token to a single
+   * assistant bubble. If the stream is empty or fails, falls back to POST
+   * /api/chat so the user still gets a full answer instead of a blank bubble.
    */
   const askAssistant = useCallback(
     async (text: string, history: ChatMessage[]) => {
-      // Widgets and error bubbles are UI-only, so they are excluded from the
-      // context sent upstream; everything else preserves conversation memory.
       const payload = {
         message: text,
         history: history.filter((m) => m.status !== 'error' && !m.widget)
@@ -184,6 +212,40 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
         });
       };
 
+      const fetchJsonReply = async () => {
+        const fallback = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const body = await fallback.json().catch(() => ({}));
+        if (!fallback.ok) {
+          throw new Error(body.error || `HTTP ${fallback.status}`);
+        }
+        if (!body.reply || !String(body.reply).trim()) {
+          throw new Error('Empty reply from /api/chat');
+        }
+        if (body.geminiError) {
+          console.warn('[Chat] Gemini failed, used fallback:', body.geminiError);
+        }
+        setDegraded(Boolean(body.degraded));
+        // Replace any partial stream bubble with the complete JSON reply.
+        setMessages((prev) => {
+          const withoutPartial = prev.filter((m) => m.id !== streamId);
+          return [
+            ...withoutPartial,
+            {
+              id: streamId,
+              sender: 'assistant' as const,
+              text: body.reply,
+              timestamp: now(),
+              status: 'ok' as const
+            }
+          ];
+        });
+        setFailedPrompt(null);
+      };
+
       setThinking(true);
       try {
         const response = await fetch('/api/chat/stream', {
@@ -194,24 +256,11 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
 
         if (!response.ok) {
           const body = await response.json().catch(() => ({}));
-          throw new Error(body.error || 'Something went wrong, please try again.');
+          throw new Error(body.error || `HTTP ${response.status}`);
         }
 
         if (!response.body) {
-          // Environment cannot stream — take the whole reply in one shot instead.
-          const fallback = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (!fallback.ok) {
-            const body = await fallback.json().catch(() => ({}));
-            throw new Error(body.error || 'Something went wrong, please try again.');
-          }
-          const data = await fallback.json();
-          setDegraded(Boolean(data.degraded));
-          pushMessage({ sender: 'assistant', text: data.reply, status: 'ok' });
-          setFailedPrompt(null);
+          await fetchJsonReply();
           return;
         }
 
@@ -223,8 +272,6 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
         let receivedAny = false;
         let isDegraded = false;
 
-        // SSE frames are separated by a blank line; a frame may straddle chunks,
-        // so the trailing partial frame stays in the buffer until it completes.
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -234,38 +281,57 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
           buffer = frames.pop() ?? '';
 
           for (const frame of frames) {
-            const line = frame.trim();
-            if (!line.startsWith('data:')) continue;
-            let event: any;
-            try {
-              event = JSON.parse(line.slice(5).trim());
-            } catch {
-              continue;
-            }
-            if (event.degraded) isDegraded = true;
-            if (event.error) streamError = event.error;
-            if (typeof event.delta === 'string' && event.delta.length > 0) {
-              receivedAny = true;
-              setThinking(false);
-              appendDelta(event.delta);
+            const dataLines = frame
+              .split('\n')
+              .map((l) => l.trim())
+              .filter((l) => l.startsWith('data:'));
+            for (const line of dataLines) {
+              let event: any;
+              try {
+                event = JSON.parse(line.slice(5).trim());
+              } catch {
+                continue;
+              }
+              if (event.degraded) isDegraded = true;
+              if (event.error) streamError = event.error;
+              if (event.warning) console.warn('[Chat] stream warning:', event.warning);
+              if (typeof event.delta === 'string' && event.delta.length > 0) {
+                receivedAny = true;
+                setThinking(false);
+                appendDelta(event.delta);
+              }
             }
           }
         }
 
         setDegraded(isDegraded);
-        if (streamError) throw new Error(streamError);
-        if (!receivedAny) throw new Error('The assistant returned an empty response.');
+        if (streamError && !receivedAny) throw new Error(streamError);
+        if (!receivedAny) {
+          console.warn('[Chat] Empty SSE body — falling back to /api/chat');
+          await fetchJsonReply();
+          return;
+        }
+        if (!isDegraded) setDegraded(false);
+        if (streamError) {
+          // Partial answer already shown; surface the error as a follow-up note.
+          console.error('[Chat] Stream ended with error after partial text:', streamError);
+        }
         setFailedPrompt(null);
       } catch (err: any) {
         console.error('Chat AI error:', err);
-        // Discard any partial text so a half-finished answer isn't left behind.
-        setMessages((prev) => prev.filter((m) => m.id !== streamId));
-        pushAssistantError(
-          `**Something went wrong, please try again.**\n\n${
-            err?.message || 'The assistant could not be reached.'
-          }`,
-          text
-        );
+        try {
+          await fetchJsonReply();
+          return;
+        } catch (fallbackErr: any) {
+          console.error('Chat AI fallback error:', fallbackErr);
+          setMessages((prev) => prev.filter((m) => m.id !== streamId));
+          const errText = fallbackErr?.message || err?.message || 'The assistant could not be reached.';
+          if (isGeminiConfigError(errText)) {
+            setDegraded(true);
+            setShowKeyModal(true);
+          }
+          pushAssistantError(`**Error talking to the assistant.**\n\n${errText}`, text);
+        }
       } finally {
         setStreamingId(null);
         setThinking(false);
@@ -273,6 +339,79 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
     },
     [pushMessage, pushAssistantError]
   );
+
+  const handleConfigureKey = useCallback(async () => {
+    const key = apiKeyInput.trim();
+    if (!key) {
+      setKeyError('Paste your Gemini API key.');
+      return;
+    }
+    setKeySaving(true);
+    setKeyError(null);
+    try {
+      const res = await fetch('/api/chat/configure-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: key, persist: true })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      setDegraded(false);
+      setShowKeyModal(false);
+      setApiKeyInput('');
+      pushMessage({
+        sender: 'assistant',
+        status: 'ok',
+        text:
+          `**Gemini connected.** Key saved to \`.env\` (${body.geminiKeyPreview || 'configured'}). You can chat normally now.`
+      });
+      if (failedPrompt) {
+        const prompt = failedPrompt;
+        setFailedPrompt(null);
+        setMessages((prev) => prev.filter((m) => m.status !== 'error'));
+        askAssistant(prompt, messages.filter((m) => m.status !== 'error'));
+      }
+    } catch (err: any) {
+      setKeyError(err?.message || 'Could not save key');
+    } finally {
+      setKeySaving(false);
+    }
+  }, [apiKeyInput, failedPrompt, messages, pushMessage, askAssistant]);
+
+  const runPipelinePing = useCallback(async () => {
+    setThinking(true);
+    try {
+      const [statusRes, pingRes] = await Promise.all([
+        fetch('/api/chat/status'),
+        fetch('/api/chat/ping', { method: 'POST' })
+      ]);
+      const status = await statusRes.json();
+      const ping = await pingRes.json().catch(() => ({}));
+      console.log('[Chat] pipeline status:', status);
+      console.log('[Chat] pipeline ping:', ping);
+      const ok = Boolean(ping.ok);
+      pushMessage({
+        sender: 'assistant',
+        status: ok ? 'ok' : 'error',
+        text:
+          `**Dev pipeline ping**\n\n` +
+          `- Gemini configured: **${status.geminiConfigured ? 'yes' : 'no'}**` +
+          (status.geminiKeyPreview ? ` (\`${status.geminiKeyPreview}\`)` : '') +
+          `\n- Models: \`${(status.models || []).join(', ')}\`\n` +
+          `- HTTP: **${pingRes.status}** · source: **${ping.source || 'n/a'}**` +
+          (ping.model ? ` (\`${ping.model}\`)` : '') +
+          `\n\n**Raw reply / error**\n\n${ping.reply || ping.error || '(empty)'}`
+      });
+      setDegraded(!status.geminiConfigured);
+    } catch (err: any) {
+      console.error('[Chat] pipeline ping failed:', err);
+      pushAssistantError(`**Pipeline ping failed.**\n\n${err?.message || err}`);
+    } finally {
+      setThinking(false);
+    }
+  }, [pushMessage, pushAssistantError]);
 
   /**
    * Invest / withdraw: resolves a live price, validates the order up front, and
@@ -586,6 +725,18 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
             <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             <span className="text-slate-700 dark:text-slate-300">{money(cashBalance)}</span>
           </div>
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              onClick={runPipelinePing}
+              disabled={thinking}
+              className="p-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              title="Dev only: ping /api/chat/status and /api/chat/ping"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Ping</span>
+            </button>
+          )}
           <button
             onClick={handleReset}
             className="p-2 rounded-xl bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
@@ -598,12 +749,79 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
       </div>
 
       {degraded && (
-        <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 text-[11px] text-amber-800 dark:text-amber-300">
-          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
-          <span>
-            Gemini LLM is offline (<code className="font-mono">GEMINI_API_KEY</code> missing). Answers
-            still use live portfolio & impact data. Trade and alert commands work as usual.
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 text-[11px] text-amber-800 dark:text-amber-300">
+          <div className="flex items-start gap-2 flex-1">
+            <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+            <span>
+              Gemini is offline — your <code className="font-mono">.env</code> still has the placeholder{' '}
+              <code className="font-mono">your_key_here</code>. Paste a real key from{' '}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="underline font-semibold"
+              >
+                Google AI Studio
+              </a>
+              .
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setKeyError(null);
+              setShowKeyModal(true);
+            }}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs transition-colors"
+          >
+            Add API Key
+          </button>
+        </div>
+      )}
+
+      {showKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#161B2C] border border-slate-200 dark:border-[#232A3D] p-5 shadow-xl">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-1">Connect Gemini</h2>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-4">
+              Paste your API key from{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="underline">
+                aistudio.google.com/apikey
+              </a>
+              . It will be validated, saved to <code className="font-mono">.env</code>, and activated immediately.
+            </p>
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder="AIzaSy..."
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-[#232A3D] bg-slate-50 dark:bg-[#0F1420] text-xs font-mono text-slate-900 dark:text-white mb-2"
+              autoFocus
+            />
+            {keyError && (
+              <p className="text-[11px] text-rose-600 dark:text-rose-400 mb-2">{keyError}</p>
+            )}
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowKeyModal(false);
+                  setKeyError(null);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-400"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfigureKey}
+                disabled={keySaving}
+                className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-semibold"
+              >
+                {keySaving ? 'Validating…' : 'Save & Connect'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -689,7 +907,19 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
         )}
 
         {showRetry && (
-          <div className="flex justify-start pl-10 sm:pl-11">
+          <div className="flex flex-wrap items-center gap-2 justify-start pl-10 sm:pl-11">
+            {degraded && (
+              <button
+                type="button"
+                onClick={() => {
+                  setKeyError(null);
+                  setShowKeyModal(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold transition-all flex items-center gap-1.5"
+              >
+                <AlertTriangle className="w-3 h-3" /> Add API Key
+              </button>
+            )}
             <button
               onClick={handleRetry}
               className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#0F1420] border border-slate-300 dark:border-[#232A3D] text-slate-700 dark:text-slate-300 text-[11px] font-bold hover:border-slate-400 transition-all flex items-center gap-1.5"

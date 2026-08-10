@@ -9,6 +9,7 @@ import cron from 'node-cron';
 import { GoogleGenAI } from '@google/genai';
 import { fetchHeadlines } from './newsApi.js';
 import { getGeminiApiKey } from './envConfig.js';
+import { GEMINI_DEFAULT_MODEL } from './geminiClient.js';
 
 export type ImpactSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
@@ -378,7 +379,7 @@ Return JSON array only:
 projectedMin/Max are estimated same-day % stock impact (e.g. -4 to -2 for bad news). Only include tickers genuinely affected.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: GEMINI_DEFAULT_MODEL,
       contents: prompt,
       config: { responseMimeType: 'application/json', temperature: 0.1 }
     });

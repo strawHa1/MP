@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { fetchHeadlines, fetchCompanyNews } from './newsApi.js';
 import {
@@ -29,18 +28,26 @@ import {
   startDashboardTrendCron
 } from './dashboardTrendService.js';
 import { getDashboardIntelligence } from './dashboardIntelligenceService.js';
-import { getGeminiApiKey, logGeminiKeyStatus } from './envConfig.js';
+import { getGeminiApiKey, getGeminiKeySource, loadProjectEnv, logGeminiKeyStatus, maskGeminiApiKey, persistGeminiKeyToEnv, sanitizeEnvValue } from './envConfig.js';
 import {
-  buildLocalChatReply,
+  createGeminiClient,
+  formatGeminiError,
+  GEMINI_CHAT_MODELS,
+  GEMINI_DEFAULT_MODEL,
+  logRawGeminiError,
+  validateGeminiKey
+} from './geminiClient.js';
+import {
   formatContextForPrompt,
-  gatherLiveChatContext,
-  streamTextChunks
+  gatherLiveChatContext
 } from './localChatService.js';
 
-// Loaded before any request handler runs; every module reads process.env lazily
-// inside functions, so this single call covers the whole server. Both paths are
-// listed so `node dist/server.cjs` resolves env the same way `tsx` does in dev.
-dotenv.config({ path: ['.env.local', '.env'] });
+// Load .env then .env.local (if present). Missing .env.local must not block .env.
+const envLoad = loadProjectEnv(process.cwd());
+console.log('[AI] Env files loaded:', envLoad.loaded.length ? envLoad.loaded.join(' | ') : '(none)');
+if (envLoad.errors.length) {
+  console.warn('[AI] Env load warnings:', envLoad.errors.join(' | '));
+}
 
 const app = express();
 const PORT = 3002;
@@ -49,18 +56,7 @@ const ENV_FILE_PATH = path.join(process.cwd(), '.env');
 app.use(express.json());
 
 // Initialize Gemini AI Client
-const getGenAI = () => {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) return null;
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build'
-      }
-    }
-  });
-};
+const getGenAI = () => createGeminiClient();
 
 // Base market prices baseline for realistic stock data
 const STOCK_BASELINES: Record<string, { name: string; price: number; prevClose: number }> = {
@@ -284,7 +280,7 @@ Return JSON with this schema:
 }`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: GEMINI_DEFAULT_MODEL,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -308,15 +304,17 @@ Return JSON with this schema:
   }
 });
 
-const CHAT_SYSTEM_PROMPT = `You are Black Swan AI, an elite quantitative financial risk intelligence assistant on the Black Swan platform.
-Your role is to analyze geopolitical events, market sentiment, stock risk scores (e.g., NVDA, TSM, XOM, LMT), portfolio hedging strategies, and supply chain bottlenecks.
+const CHAT_SYSTEM_PROMPT = `You are the Black Swan AI Assistant, a general-purpose, highly capable financial risk intelligence assistant embedded in the Black Swan platform. You must:
 
-The platform can also execute these actions for the user, so mention them when relevant:
-- Invest or withdraw a dollar amount from a stock (always requires explicit user confirmation).
-- Create price alerts (e.g. "Alert me if TSM drops below $150") and risk-index alerts.
+- Understand and respond accurately to ANY question the user asks, whether it's small talk, general knowledge, a question about finance/markets/risk concepts, math, or a specific query about live platform data.
+- Only include Black Swan's live data (risk scores, headlines, company risk, portfolio data) in your answer when the question is actually about that data. Do not force this data into unrelated answers.
+- For general knowledge or conceptual questions (e.g. "what is a hedge fund", "explain P/E ratio", "what's the capital of France", "what's 25 * 4"), answer using your own knowledge accurately and concisely — do not dump portfolio or headline lists.
+- For platform questions, explain based on the actual features of Black Swan (Dashboard, Global Events, Company Explorer, Sector Explorer, World Risk Map, AI Reports, Portfolio Risk, Alerts Center, trading, alerts).
+- For trade or alert commands mentioned in chat, confirm the details clearly and remind the user that the UI will show a confirmation card before anything executes.
+- Never repeat the same canned response for unrelated questions. Always generate a fresh, relevant answer to what was actually asked.
+- If a question is ambiguous, ask a short clarifying question instead of guessing.
 
-Format responses in Markdown. Use bold for key figures, bullet points for lists, and tables when comparing multiple tickers.
-Keep responses clear, professional, direct, and analytical. Never invent live prices — describe drivers and ranges instead.`;
+Format responses in Markdown when helpful (bold key terms, short lists). Keep answers clear, direct, and conversational.`;
 
 /**
  * Translates the client's ChatMessage[] history into the Gemini `contents` shape.
@@ -340,46 +338,177 @@ function buildChatHistory(history: unknown) {
   return mapped;
 }
 
-async function createChatSession(ai: GoogleGenAI, history: unknown) {
-  // Ground the model in the same live snapshot the local fallback uses so answers
-  // stay consistent whether Gemini is on or off.
+async function buildSystemInstruction(): Promise<string> {
   let liveBlock = '';
   try {
     liveBlock = '\n\n' + formatContextForPrompt(await gatherLiveChatContext());
   } catch (e: any) {
     console.warn('[AI] Live context gather failed:', e?.message || e);
   }
+  return CHAT_SYSTEM_PROMPT + liveBlock;
+}
 
+function createChatSession(
+  ai: GoogleGenAI,
+  model: string,
+  history: unknown,
+  systemInstruction: string
+) {
   return ai.chats.create({
-    model: 'gemini-2.5-flash',
+    model,
     config: {
-      systemInstruction: CHAT_SYSTEM_PROMPT + liveBlock,
-      temperature: 0.4
+      systemInstruction,
+      temperature: 0.5
     },
     history: buildChatHistory(history)
   });
 }
 
-/** Stream a locally built reply word-by-word so the UI still feels ChatGPT-like. */
-async function streamLocalReply(
+const GEMINI_OFFLINE_ERROR =
+  'Error: Gemini is not configured. Click **Add API Key** in the yellow banner (or paste a real `GEMINI_API_KEY` into `.env` — not `your_key_here` — then restart with `npm run dev`). Get a free key at https://aistudio.google.com/apikey';
+
+/**
+ * Try each known Flash model until one accepts the request. Logs the raw first
+ * failure so a bad model ID is obvious in the server console.
+ */
+async function sendGeminiMessage(
+  ai: GoogleGenAI,
   message: string,
-  send: (payload: Record<string, unknown>) => void,
-  aborted: () => boolean
-) {
-  const reply = await buildLocalChatReply(message);
-  for await (const delta of streamTextChunks(reply)) {
-    if (aborted()) return;
-    send({ delta, source: 'local' });
+  history: unknown,
+  stream: boolean
+): Promise<{ text: string; model: string; chunks?: AsyncGenerator<any> }> {
+  console.log(`[AI] User message (${message.length} chars):`, message.slice(0, 200));
+  const systemInstruction = await buildSystemInstruction();
+  let lastError: unknown = null;
+
+  for (const model of GEMINI_CHAT_MODELS) {
+    try {
+      console.log(`[AI] Trying Gemini model "${model}" (stream=${stream})…`);
+      const chat = createChatSession(ai, model, history, systemInstruction);
+      if (stream) {
+        const chunks = await chat.sendMessageStream({ message });
+        return { text: '', model, chunks };
+      }
+      const response = await chat.sendMessage({ message });
+      console.log('[AI] Gemini raw response text:', JSON.stringify(response.text ?? null));
+      const text = (response.text || '').trim();
+      if (!text) throw new Error('Empty response.text from Gemini');
+      return { text, model };
+    } catch (err) {
+      lastError = err;
+      logRawGeminiError(`model ${model} failed`, err);
+    }
   }
-  if (!aborted()) send({ done: true, source: 'local' });
+
+  throw lastError || new Error('All Gemini chat models failed');
 }
 
 /**
+ * Dev / ops probe — confirms env loading and returns a one-shot Gemini reply
+ * for the hardcoded ping so the UI can verify the pipeline quickly.
+ */
+app.get('/api/chat/status', (req, res) => {
+  const key = getGeminiApiKey();
+  const raw = String(process.env.GEMINI_API_KEY || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+  const rawMasked = !raw
+    ? null
+    : raw.length <= 8
+      ? `${raw.slice(0, 2)}…(len ${raw.length})`
+      : `${raw.slice(0, 4)}...${raw.slice(-4)} (len ${raw.length})`;
+  res.json({
+    ok: true,
+    geminiConfigured: Boolean(key),
+    geminiKeyPreview: key
+      ? `${key.slice(0, 4)}...${key.slice(-4)} (len ${key.length})`
+      : null,
+    geminiEnvRawMasked: rawMasked,
+    rejectedAsPlaceholder: Boolean(raw) && !key,
+    keySource: getGeminiKeySource(),
+    models: GEMINI_CHAT_MODELS,
+    envFile: ENV_FILE_PATH
+  });
+});
+
+/**
+ * Validate a Gemini key against Google, activate it for this server process, and
+ * optionally persist it to `.env` so restarts keep working.
+ */
+app.post('/api/chat/configure-key', async (req, res) => {
+  const apiKey = sanitizeEnvValue(req.body?.apiKey);
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Paste your Gemini API key first.' });
+  }
+  if (apiKey.length < 20) {
+    return res.status(400).json({
+      error: 'That key looks too short. Real Google keys are ~39 characters and start with AIza.'
+    });
+  }
+
+  try {
+    const validatedModel = await validateGeminiKey(apiKey);
+    console.log(`[AI] configure-key validated via ${validatedModel}`);
+  } catch (e: any) {
+    logRawGeminiError('configure-key validation', e);
+    return res.status(400).json({
+      error: `Google rejected this key: ${formatGeminiError(e)}`
+    });
+  }
+
+  const persist = req.body?.persist !== false;
+  try {
+    persistGeminiKeyToEnv(apiKey, ENV_FILE_PATH);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'Failed to save key' });
+  }
+
+  const active = getGeminiApiKey();
+  console.log(`[AI] Gemini key configured via UI (${maskGeminiApiKey(active || apiKey)})`);
+  return res.json({
+    ok: true,
+    geminiConfigured: true,
+    geminiKeyPreview: active ? maskGeminiApiKey(active) : null,
+    keySource: getGeminiKeySource(),
+    persisted: persist
+  });
+});
+
+app.post('/api/chat/ping', async (req, res) => {
+  const message = 'Reply with exactly: pong';
+  const ai = getGenAI();
+  console.log('[AI] /api/chat/ping — geminiConfigured=', Boolean(ai));
+  if (!ai) {
+    return res.status(503).json({
+      ok: false,
+      source: 'none',
+      geminiConfigured: false,
+      error: GEMINI_OFFLINE_ERROR
+    });
+  }
+  try {
+    const { text, model } = await sendGeminiMessage(ai, message, [], false);
+    return res.json({
+      ok: true,
+      source: 'gemini',
+      geminiConfigured: true,
+      model,
+      reply: text
+    });
+  } catch (e: any) {
+    logRawGeminiError('/api/chat/ping', e);
+    return res.status(502).json({
+      ok: false,
+      geminiConfigured: true,
+      error: `Error: ${formatGeminiError(e)}`
+    });
+  }
+});
+
+/**
  * Streaming chat endpoint (Server-Sent Events).
- *
- * Primary path: Gemini token stream when a key is set.
- * Fallback: live-data local reply streamed in small chunks (same SSE shape) so the
- * assistant still answers risk questions without a key.
+ * Every analytical / conversational message goes to Gemini — no canned replies.
  */
 app.post('/api/chat/stream', async (req, res) => {
   const { message, history } = req.body;
@@ -390,75 +519,64 @@ app.post('/api/chat/stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  // Disables proxy buffering so chunks reach the browser immediately.
   res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();
+  }
 
   const send = (payload: Record<string, unknown>) => {
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
   };
 
   let aborted = false;
-  // Use the response socket — `req` "close" fires as soon as the POST body is
-  // fully read, which would abort the stream before the first token is written.
   res.on('close', () => {
-    aborted = true;
+    if (!res.writableEnded) aborted = true;
   });
 
   const ai = getGenAI();
   if (!ai) {
-    try {
-      await streamLocalReply(message, send, () => aborted);
-    } catch (e: any) {
-      console.error('[AI] Local chat stream error:', e?.message || e);
-      if (!aborted) {
-        send({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
-        send({ done: true });
-      }
-    }
+    send({ error: GEMINI_OFFLINE_ERROR, degraded: true });
+    send({ done: true, degraded: true });
     return res.end();
   }
 
   try {
-    const chat = await createChatSession(ai, history);
-    const stream = await chat.sendMessageStream({ message });
-
+    const { model, chunks } = await sendGeminiMessage(ai, message, history, true);
     let streamed = '';
-    for await (const chunk of stream) {
+    for await (const chunk of chunks!) {
       if (aborted) break;
       const delta = chunk.text;
       if (delta) {
         streamed += delta;
-        send({ delta, source: 'gemini' });
+        send({ delta, source: 'gemini', model });
       }
     }
+    console.log(
+      `[AI] Streamed ${streamed.length} chars from ${model}:`,
+      streamed.slice(0, 160).replace(/\n/g, ' ')
+    );
 
     if (!aborted) {
       if (!streamed.trim()) {
-        // Empty model output → fall back to live-data answer instead of failing hard.
-        await streamLocalReply(message, send, () => aborted);
-      } else {
-        send({ done: true, source: 'gemini' });
+        send({ error: 'Error: Gemini returned an empty response. Please try again.' });
       }
+      send({ done: true, source: 'gemini', model });
     }
     res.end();
   } catch (e: any) {
-    console.error('[AI] Chat stream error:', e?.message || e);
+    logRawGeminiError('Chat stream', e);
     if (!aborted) {
-      try {
-        await streamLocalReply(message, send, () => aborted);
-      } catch {
-        send({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
-        send({ done: true });
-      }
+      send({ error: `Error: ${formatGeminiError(e)}` });
+      send({ done: true });
     }
     res.end();
   }
 });
 
 /**
- * Non-streaming chat endpoint. Kept as the client's fallback for environments
- * where the SSE body cannot be read incrementally.
+ * Non-streaming chat endpoint — client fallback when SSE cannot be read.
  */
 app.post('/api/chat', async (req, res) => {
   const { message, history } = req.body;
@@ -468,33 +586,22 @@ app.post('/api/chat', async (req, res) => {
 
   const ai = getGenAI();
   if (!ai) {
-    try {
-      const reply = await buildLocalChatReply(message);
-      return res.json({ reply, degraded: false, source: 'local' });
-    } catch (e: any) {
-      console.error('[AI] Local chat error:', e?.message || e);
-      return res.status(502).json({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
-    }
+    return res.status(503).json({
+      error: GEMINI_OFFLINE_ERROR,
+      degraded: true,
+      geminiConfigured: false
+    });
   }
 
   try {
-    const chat = await createChatSession(ai, history);
-    const response = await chat.sendMessage({ message });
-    const reply = (response.text || '').trim();
-    if (!reply) {
-      const local = await buildLocalChatReply(message);
-      return res.json({ reply: local, degraded: false, source: 'local' });
-    }
-
-    return res.json({ reply, degraded: false, source: 'gemini' });
+    const { text, model } = await sendGeminiMessage(ai, message, history, false);
+    return res.json({ reply: text, degraded: false, source: 'gemini', model, geminiConfigured: true });
   } catch (e: any) {
-    console.error('[AI] Chat error:', e?.message || e);
-    try {
-      const local = await buildLocalChatReply(message);
-      return res.json({ reply: local, degraded: false, source: 'local' });
-    } catch {
-      return res.status(502).json({ error: 'AI Assistant is temporarily unavailable. Please try again.' });
-    }
+    logRawGeminiError('/api/chat', e);
+    return res.status(502).json({
+      error: `Error: ${formatGeminiError(e)}`,
+      geminiConfigured: true
+    });
   }
 });
 
