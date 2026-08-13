@@ -30,26 +30,6 @@ export interface CompanyProfile extends CompanyRisk {
   inWatchlist: boolean;
 }
 
-export interface SectorLiveData {
-  id: string;
-  name: string;
-  description: string;
-  tickers: string[];
-  keyRisks: string[];
-  aiInsight: string;
-  riskScore: number;
-  marketImpact: string;
-  companyCount: number;
-  constituents: {
-    ticker: string;
-    name: string;
-    exchange: string;
-    riskScore: number;
-    quote: StockQuote | null;
-  }[];
-  lastUpdated: string;
-}
-
 export interface LiveCountryRisk {
   id: string;
   name: string;
@@ -164,19 +144,6 @@ export interface CompanyRisk {
   aiSummary: string;
   recentNews: { title: string; source: string; time: string; sentiment: 'negative' | 'neutral' | 'positive' }[];
   riskTrend: { date: string; score: number }[];
-}
-
-export interface SectorRisk {
-  id: string;
-  name: string;
-  iconName: string;
-  riskScore: number;
-  companyCount: number;
-  marketImpact: 'Critical' | 'Strong Negative' | 'Moderate' | 'Neutral' | 'Positive';
-  topTickers: string[];
-  keyRisks: string[];
-  aiInsight: string;
-  description: string;
 }
 
 export interface CountryRisk {

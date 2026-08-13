@@ -52,7 +52,6 @@ const SECTOR_BASE_RISK: Record<string, number> = {
 const HIGH_EXPOSURE_COUNTRIES = new Set(['Taiwan', 'China', 'Israel', 'Ukraine', 'Iran']);
 
 let watchlistCache: WatchlistEntry[] | null = null;
-let sectorsCache: any[] | null = null;
 let countriesCache: any[] | null = null;
 
 function loadJson<T>(filename: string): T {
@@ -343,62 +342,6 @@ export async function getCompanyProfile(ticker: string): Promise<CompanyProfileR
     quote,
     activeImpactCount: impacts.length,
     inWatchlist: !!watchEntry
-  };
-}
-
-export function getSectorsConfig() {
-  if (!sectorsCache) sectorsCache = loadJson('sectors.json');
-  return sectorsCache;
-}
-
-export function getSectorById(id: string) {
-  return getSectorsConfig().find((s: any) => s.id === id);
-}
-
-function impactLevelFromScore(score: number): string {
-  if (score >= 75) return 'Critical';
-  if (score >= 60) return 'High';
-  if (score >= 40) return 'Moderate';
-  return 'Low';
-}
-
-export async function getSectorLiveData(sectorId: string) {
-  const sector = getSectorById(sectorId);
-  if (!sector) return null;
-
-  const tickers: string[] = [...new Set(sector.tickers as string[])];
-  const quotes = await fetchQuotesBatch(tickers);
-  const constituents = await Promise.all(
-    tickers.map(async (t) => {
-      const entry = getWatchlistEntry(t);
-      const quote = quotes[t];
-      const finnhub = entry ? null : await fetchFinnhubProfile(t);
-      const name = entry?.companyName || finnhub?.name || t;
-      const sector = entry?.sector || finnhub?.finnhubIndustry || 'Unknown';
-      const country = entry?.country || finnhub?.country || 'Unknown';
-      const impacts = getImpactState().impactedCompanies.filter((r) => r.ticker === t);
-      const riskScore = computeRiskScoreForMeta({ sector, country, ticker: t }, quote, impacts.length);
-      return {
-        ticker: t,
-        name,
-        exchange: entry?.exchange || finnhub?.exchange || 'US',
-        riskScore,
-        quote
-      };
-    })
-  );
-  const valid = constituents;
-  const avgRisk = valid.length
-    ? Math.round(valid.reduce((s, c) => s + c.riskScore, 0) / valid.length)
-    : 50;
-
-  return {
-    ...sector,
-    riskScore: avgRisk,
-    marketImpact: impactLevelFromScore(avgRisk),
-    companyCount: valid.length,
-    constituents: valid,
-    lastUpdated: new Date().toISOString()
   };
 }
 

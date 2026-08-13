@@ -129,6 +129,6 @@ export function formatContextForPrompt(ctx: LiveChatContext): string {
     'Recent headlines:',
     headlines || '- (none)',
     '',
-    'Platform features the user can open: Dashboard, Global Events, Company Explorer, Sector Explorer, World Risk Map, AI Reports, Portfolio Risk, Alerts Center, AI Assistant (chat). Trading commands like "Invest $5,000 in NVDA" and alerts like "Alert me if TSM drops below $150" are handled by the UI with an explicit confirmation step.'
+    'Platform features the user can open: Dashboard, Global Events, Company Explorer, World Risk Map, AI Reports, Portfolio Risk, Alerts Center, AI Assistant (chat). Trading commands like "Invest $5,000 in NVDA" and alerts like "Alert me if TSM drops below $150" are handled by the UI with an explicit confirmation step.'
   ].join('\n');
 }

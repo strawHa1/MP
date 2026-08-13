@@ -14,8 +14,6 @@ import {
   getWatchlist,
   searchWatchlist,
   getCompanyProfile,
-  getSectorsConfig,
-  getSectorLiveData,
   getLiveCountryRisk,
   fetchQuote,
   fetchQuotesBatch
@@ -185,22 +183,6 @@ app.get('/api/companies/:ticker', async (req, res) => {
   }
 });
 
-/** All sectors config */
-app.get('/api/sectors', (_req, res) => {
-  res.json({ sectors: getSectorsConfig() });
-});
-
-/** Live sector data with constituent quotes */
-app.get('/api/sectors/:id', async (req, res) => {
-  try {
-    const data = await getSectorLiveData(req.params.id);
-    if (!data) return res.status(404).json({ error: 'Sector not found' });
-    res.json(data);
-  } catch (e: any) {
-    res.status(500).json({ error: e?.message || 'Failed to load sector' });
-  }
-});
-
 /** Global risk score 30-day trend (daily snapshots + headline backfill) */
 app.get('/api/dashboard/trend', async (req, res) => {
   try {
@@ -279,16 +261,29 @@ Return JSON with this schema:
   ]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_DEFAULT_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0.3
+    let reportText = '';
+    let lastError: unknown = null;
+    for (const model of GEMINI_CHAT_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3
+          }
+        });
+        reportText = (response.text || '').trim();
+        if (reportText) break;
+        throw new Error('Empty report response');
+      } catch (err) {
+        lastError = err;
+        logRawGeminiError(`report model ${model} failed`, err);
       }
-    });
+    }
+    if (!reportText) throw lastError || new Error('Failed to generate report');
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = JSON.parse(reportText);
     return res.json({
       id: `rep-${Date.now()}`,
       title: parsed.title || `${topic} Intelligence Brief`,
@@ -309,7 +304,7 @@ const CHAT_SYSTEM_PROMPT = `You are the Black Swan AI Assistant, a general-purpo
 - Understand and respond accurately to ANY question the user asks, whether it's small talk, general knowledge, a question about finance/markets/risk concepts, math, or a specific query about live platform data.
 - Only include Black Swan's live data (risk scores, headlines, company risk, portfolio data) in your answer when the question is actually about that data. Do not force this data into unrelated answers.
 - For general knowledge or conceptual questions (e.g. "what is a hedge fund", "explain P/E ratio", "what's the capital of France", "what's 25 * 4"), answer using your own knowledge accurately and concisely — do not dump portfolio or headline lists.
-- For platform questions, explain based on the actual features of Black Swan (Dashboard, Global Events, Company Explorer, Sector Explorer, World Risk Map, AI Reports, Portfolio Risk, Alerts Center, trading, alerts).
+- For platform questions, explain based on the actual features of Black Swan (Dashboard, Global Events, Company Explorer, World Risk Map, AI Reports, Portfolio Risk, Alerts Center, trading, alerts).
 - For trade or alert commands mentioned in chat, confirm the details clearly and remind the user that the UI will show a confirmation card before anything executes.
 - Never repeat the same canned response for unrelated questions. Always generate a fresh, relevant answer to what was actually asked.
 - If a question is ambiguous, ask a short clarifying question instead of guessing.
@@ -443,7 +438,7 @@ app.post('/api/chat/configure-key', async (req, res) => {
   }
   if (apiKey.length < 20) {
     return res.status(400).json({
-      error: 'That key looks too short. Real Google keys are ~39 characters and start with AIza.'
+      error: 'That key looks too short. Gemini keys start with AQ. (new) or AIza (legacy).'
     });
   }
 

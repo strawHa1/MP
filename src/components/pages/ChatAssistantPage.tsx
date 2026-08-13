@@ -794,7 +794,7 @@ export const ChatAssistantPage: React.FC<ChatAssistantPageProps> = ({ onNavigate
               type="password"
               value={apiKeyInput}
               onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder="AIzaSy..."
+              placeholder="AQ.... or AIzaSy..."
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-[#232A3D] bg-slate-50 dark:bg-[#0F1420] text-xs font-mono text-slate-900 dark:text-white mb-2"
               autoFocus
             />

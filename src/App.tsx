@@ -6,7 +6,6 @@ import { DashboardPage } from './components/pages/DashboardPage';
 import { EventsPage } from './components/pages/EventsPage';
 import { EventDetailPage } from './components/pages/EventDetailPage';
 import { CompanyExplorerPage } from './components/pages/CompanyExplorerPage';
-import { SectorExplorerPage } from './components/pages/SectorExplorerPage';
 import { WorldMapPage } from './components/pages/WorldMapPage';
 import { ReportsPage } from './components/pages/ReportsPage';
 import { PortfolioRiskPage } from './components/pages/PortfolioRiskPage';
@@ -146,10 +145,6 @@ export function App() {
               userRiskTolerance={userRiskTolerance}
               theme={theme}
             />
-          )}
-
-          {baseRoute === '/sectors' && (
-            <SectorExplorerPage onNavigate={navigate} />
           )}
 
           {baseRoute === '/map' && (

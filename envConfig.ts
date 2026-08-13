@@ -141,7 +141,7 @@ export function logGeminiKeyStatus(envFilePath: string): void {
       '      Trade / alert commands still work without it.\n' +
       '\n' +
       ` 1. Edit:  ${envFilePath}\n` +
-      ' 2. Set:   GEMINI_API_KEY=AIzaSy...\n' +
+      ' 2. Set:   GEMINI_API_KEY=AQ.... (or legacy AIzaSy...)\n' +
       '    (no spaces; quotes optional; do NOT leave your_key_here)\n' +
       ' 3. Save the file, then fully restart:  npm run dev:clean\n' +
       '──────────────────────────────────────────────────────────────────────\n'

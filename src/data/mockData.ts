@@ -1,7 +1,6 @@
 import {
   GlobalEvent,
   CompanyRisk,
-  SectorRisk,
   CountryRisk,
   PortfolioItem,
   AlertItem,
@@ -334,89 +333,6 @@ export const INITIAL_EVENTS: GlobalEvent[] = [
     timeline: [
       { date: '18:00 UTC', title: 'Emergency Board Statement', detail: 'Policy committee votes 7-2 in favor of front-loaded tightening.' }
     ]
-  }
-];
-
-export const INITIAL_SECTORS: SectorRisk[] = [
-  {
-    id: 'sec-semi',
-    name: 'Semiconductors & AI Hardware',
-    iconName: 'Cpu',
-    riskScore: 84,
-    companyCount: 142,
-    marketImpact: 'Critical',
-    topTickers: ['NVDA', 'TSM', 'ASML', 'AMD', 'AVGO'],
-    keyRisks: [
-      'Taiwan Strait maritime geopolitical escalation',
-      'Advanced fabrication equipment export controls',
-      'Neon and rare earth raw material processing concentration'
-    ],
-    aiInsight: 'Highest tail-risk exposure across all global asset classes. Any disruption in Taiwan foundry output triggers cascade shutdowns across global automotive, consumer electronics, and defense sectors.',
-    description: 'Hardware backbone of modern computing, cloud infrastructure, and artificial intelligence models.'
-  },
-  {
-    id: 'sec-energy',
-    name: 'Energy, Oil & Gas Logistics',
-    iconName: 'Flame',
-    riskScore: 76,
-    companyCount: 210,
-    marketImpact: 'Strong Negative',
-    topTickers: ['XOM', 'CVX', 'SHEL', 'TTE', 'BP'],
-    keyRisks: [
-      'Strait of Hormuz and Red Sea maritime transit chokepoints',
-      'OPEC+ unilateral production quota shifts',
-      'Refining infrastructure cyberattacks and physical sabotage'
-    ],
-    aiInsight: 'Current supply buffers remain thin. Geopolitical risk premiums account for $12-$15 of current Brent crude price per barrel.',
-    description: 'Global extraction, refining, transport, and distribution of hydrocarbons and LNG.'
-  },
-  {
-    id: 'sec-defense',
-    name: 'Aerospace & National Defense',
-    iconName: 'Shield',
-    riskScore: 32,
-    companyCount: 88,
-    marketImpact: 'Positive',
-    topTickers: ['LMT', 'RTX', 'NOC', 'BA', 'GD'],
-    keyRisks: [
-      'Specialized defense component supply chain lead times',
-      'Defense procurement budget authorization friction',
-      'Titanium and specialized alloy sourcing constraints'
-    ],
-    aiInsight: 'Acts as an inverse systemic hedge. Heightened global risk environment drives structural multi-year defense budget commitments.',
-    description: 'Defense equipment, military avionics, missile defense, and naval shipbuilding contractors.'
-  },
-  {
-    id: 'sec-finance',
-    name: 'Global Banking & Financial Infrastructure',
-    iconName: 'Landmark',
-    riskScore: 54,
-    companyCount: 315,
-    marketImpact: 'Moderate',
-    topTickers: ['JPM', 'BAC', 'MS', 'GS', 'C'],
-    keyRisks: [
-      'Sovereign debt exposure in high-deficit economies',
-      'Interbank payment network cyber threats (SWIFT node integrity)',
-      'Sudden liquidity crunches from derivative margin calls'
-    ],
-    aiInsight: 'Systemic capital ratios are strong, but cross-border asset contagion remains a vulnerability during swift currency devaluations.',
-    description: 'Tier-1 investment banks, payment networks, and international clearing houses.'
-  },
-  {
-    id: 'sec-tech',
-    name: 'Software & Cloud Services',
-    iconName: 'Server',
-    riskScore: 42,
-    companyCount: 420,
-    marketImpact: 'Neutral',
-    topTickers: ['MSFT', 'AMZN', 'GOOGL', 'ORCL', 'CRM'],
-    keyRisks: [
-      'Undersea fiber optic cable sabotage risks',
-      'Data sovereignty legislation in EU and LATAM',
-      'Enterprise IT spending pullbacks during high inflation'
-    ],
-    aiInsight: 'High operating margins offer cash buffer, but undersea cable disruptions could temporarily segment global cloud regions.',
-    description: 'Enterprise SaaS, hyperscale cloud infrastructure, and software applications.'
   }
 ];
 

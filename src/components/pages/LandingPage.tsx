@@ -246,7 +246,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, events }) 
               <ul className="mt-6 space-y-3 text-sm text-slate-300">
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> Real-time US equity market quote feeds</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> 50 AI intelligence reports / mo</li>
-                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> Global Threat Heatmap & Sector Explorer</li>
+                <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> Global Threat Heatmap</li>
                 <li className="flex items-center gap-2"><Check className="w-4 h-4 text-emerald-400" /> PDF Intelligence Report Export</li>
               </ul>
             </div>
