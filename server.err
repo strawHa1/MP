@@ -1,0 +1,12 @@
+
+──────────────────────────────────────────────────────────────────────
+ [AI] GEMINI_API_KEY is NOT usable (undefined / empty).
+      Chat Q&A requires a real key from https://aistudio.google.com/apikey
+      Trade / alert commands still work without it.
+
+ 1. Edit:  C:\Users\shrey\Desktop\MP\.env
+ 2. Set:   GEMINI_API_KEY=AIzaSy...
+    (no spaces; quotes optional; do NOT leave your_key_here)
+ 3. Save the file, then fully restart:  npm run dev:clean
+──────────────────────────────────────────────────────────────────────
+
