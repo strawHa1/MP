@@ -247,10 +247,56 @@ Keep the same tickers and factual basis. Max 4 insights, max 4 actions.`;
     const parsed = JSON.parse(response.text || '{}');
     if (!Array.isArray(parsed.insights) || !Array.isArray(parsed.actions)) return null;
 
+    const allowedTickers = new Set(portfolio.map((p) => p.ticker));
+    const allowedHeadlines = new Set(headlines.map((h) => h.title));
+
+    const insights: DashboardInsight[] = parsed.insights
+      .filter((i: any) => i && typeof i.title === 'string' && typeof i.body === 'string')
+      .map((i: any) => ({
+        id: String(i.id || `insight-${i.title}`).slice(0, 80),
+        title: String(i.title).slice(0, 120),
+        body: String(i.body).slice(0, 600),
+        relatedTickers: (Array.isArray(i.relatedTickers) ? i.relatedTickers : []).filter((t: string) =>
+          allowedTickers.has(t)
+        ),
+        relatedEventTitle:
+          typeof i.relatedEventTitle === 'string' && allowedHeadlines.has(i.relatedEventTitle)
+            ? i.relatedEventTitle
+            : undefined
+      }))
+      .slice(0, 4);
+
+    const actions: RecommendedActionItem[] = parsed.actions
+      .filter(
+        (a: any) =>
+          a &&
+          allowedTickers.has(a.ticker) &&
+          (a.type === 'execute' || a.type === 'review') &&
+          typeof a.title === 'string'
+      )
+      .map((a: any) => ({
+        id: String(a.id || `action-${a.ticker}`).slice(0, 80),
+        type: a.type,
+        title: String(a.title).slice(0, 120),
+        subtitle: String(a.subtitle || ''),
+        ticker: a.ticker,
+        rationale: String(a.rationale || '').slice(0, 600),
+        targetAllocationPct: typeof a.targetAllocationPct === 'number' ? a.targetAllocationPct : undefined,
+        currentAllocationPct: typeof a.currentAllocationPct === 'number' ? a.currentAllocationPct : undefined,
+        relatedHeadline:
+          typeof a.relatedHeadline === 'string' && allowedHeadlines.has(a.relatedHeadline)
+            ? a.relatedHeadline
+            : undefined,
+        hedgeInstrument: typeof a.hedgeInstrument === 'string' ? a.hedgeInstrument : undefined
+      }))
+      .slice(0, 4);
+
+    if (insights.length === 0) return null;
+
     return {
       ...base,
-      insights: parsed.insights.slice(0, 4),
-      actions: parsed.actions.slice(0, 4),
+      insights,
+      actions: actions.length > 0 ? actions : base.actions,
       source: 'gemini'
     };
   } catch (e) {

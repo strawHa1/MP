@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Map, Globe2, Filter, Loader2, RefreshCw } from 'lucide-react';
-import { LiveCountryRisk } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
-import { useCountryRisk } from '../../lib/useCountryRisk';
+import { AUTO_REFRESH_MINUTES, useCountryRisk } from '../../lib/useCountryRisk';
 
 interface WorldMapPageProps {
   onNavigate: (path: string) => void;
@@ -10,7 +9,7 @@ interface WorldMapPageProps {
 
 export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
   const { countries, lastUpdated, loading, refreshing, error, changedIds, refresh } = useCountryRisk();
-  const [selectedCountry, setSelectedCountry] = useState<LiveCountryRisk | null>(null);
+  const [selectedCountryId, setSelectedCountryId] = useState<string | null>(null);
   const [filterLevel, setFilterLevel] = useState('all');
 
   const filtered = countries.filter((c) => {
@@ -18,7 +17,10 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
     return c.riskLevel.toLowerCase() === filterLevel.toLowerCase();
   });
 
-  const active = selectedCountry || filtered[0] || null;
+  const active =
+    countries.find((c) => c.id === selectedCountryId) ||
+    filtered[0] ||
+    null;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
@@ -68,7 +70,15 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
           <div className="lg:col-span-2 bg-[#0F1420] border border-[#232A3D] rounded-2xl p-6 shadow-2xl min-h-[480px] flex flex-col">
             <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-[#232A3D] pb-3">
               <span className="flex items-center gap-2"><Globe2 className="w-4 h-4 text-blue-400" /> {filtered.length} tracked regions</span>
-              <span className="text-emerald-500">Auto-refresh 5m</span>
+              <span className="flex items-center gap-3">
+                <span
+                  className={`flex items-center gap-1.5 text-emerald-400 ${refreshing ? 'animate-pulse' : ''}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${refreshing ? 'animate-pulse' : ''}`} />
+                  Live Feed
+                </span>
+                <span className="text-emerald-500">Auto-refresh {AUTO_REFRESH_MINUTES}m</span>
+              </span>
             </div>
 
             <div className="my-auto py-8 relative">
@@ -85,7 +95,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
                   return (
                     <div
                       key={cnt.id}
-                      onClick={() => setSelectedCountry(cnt)}
+                      onClick={() => setSelectedCountryId(cnt.id)}
                       className={`p-3 rounded-xl border cursor-pointer transition-all hover:scale-[1.02] ${borderColor} ${
                         isSelected ? 'ring-2 ring-purple-500 scale-[1.02]' : ''
                       } ${justChanged ? 'animate-pulse ring-2 ring-yellow-400/60' : ''}`}

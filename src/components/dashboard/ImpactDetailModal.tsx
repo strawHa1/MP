@@ -4,6 +4,7 @@ import { X, ExternalLink, TrendingDown, TrendingUp, Newspaper } from 'lucide-rea
 import { StockImpactRecord } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { openExternalUrl } from '../../lib/externalLink';
+import { isImpactAligned } from '../../lib/dashboardMetrics';
 
 interface ImpactDetailModalProps {
   record: StockImpactRecord | null;
@@ -47,6 +48,7 @@ export const ImpactDetailModal: React.FC<ImpactDetailModalProps> = ({
   const projectedMin = safeNum(record.projectedImpactPct?.min);
   const projectedMax = safeNum(record.projectedImpactPct?.max);
   const predictedMid = ((projectedMin + projectedMax) / 2).toFixed(1);
+  const aligned = isImpactAligned(actualChangePct, projectedMin, projectedMax);
   const isUp = actualChangePct > 0;
   const openPrice = currentPrice / (1 + actualChangePct / 100);
 
@@ -170,7 +172,9 @@ export const ImpactDetailModal: React.FC<ImpactDetailModalProps> = ({
             </div>
             <div className="mt-4 pt-3 border-t border-[#232A3D] flex items-center justify-between text-[11px] font-mono text-slate-400">
               <span>Session open ~ ${Number.isFinite(openPrice) ? openPrice.toFixed(2) : currentPrice.toFixed(2)}</span>
-              <span>Now ${currentPrice.toFixed(2)}</span>
+              <span className={aligned ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                {aligned ? '✓ Move is inside predicted range' : 'Move is outside predicted range'}
+              </span>
             </div>
           </div>
 

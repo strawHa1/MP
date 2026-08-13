@@ -22,6 +22,7 @@ import { ImpactOnStocksSection } from '../dashboard/ImpactOnStocksSection';
 import { RecommendedActionModal } from '../dashboard/RecommendedActionModal';
 import { useDashboardStats } from '../../lib/useDashboardStats';
 import { useDashboardIntelligence, RecommendedActionItem } from '../../lib/useDashboardIntelligence';
+import { displayCountryName, isDataFresh } from '../../lib/dashboardMetrics';
 
 interface DashboardPageProps {
   onNavigate: (path: string) => void;
@@ -40,6 +41,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const intelligence = useDashboardIntelligence();
   const [selectedAction, setSelectedAction] = useState<RecommendedActionItem | null>(null);
   const [actionConfirmed, setActionConfirmed] = useState<string | null>(null);
+  const dataFresh = isDataFresh(stats?.lastUpdated);
 
   const handleConfirmExecute = (action: RecommendedActionItem) => {
     const log = JSON.parse(localStorage.getItem('bs-action-log') || '[]') as object[];
@@ -70,8 +72,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#0F1420] border border-[#232A3D] p-5 rounded-2xl shadow-xl">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400 uppercase tracking-widest">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            LIVE RISK INTELLIGENCE RADAR
+            <span
+              className={`w-2 h-2 rounded-full ${
+                dataFresh ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
+              }`}
+            />
+            {dataFresh ? 'LIVE RISK INTELLIGENCE RADAR' : 'RISK INTELLIGENCE RADAR'}
           </div>
           <h1 className="text-2xl font-extrabold text-white tracking-tight mt-1">
             Global Risk Intelligence Dashboard
@@ -79,11 +85,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          {stats?.lastUpdated && (
-            <span className="text-[10px] text-emerald-400 font-mono hidden sm:block">
-              Updated {new Date(stats.lastUpdated).toLocaleTimeString()}
-            </span>
-          )}
+            {stats?.lastUpdated && (
+              <span className="text-[10px] text-emerald-400 font-mono hidden sm:block">
+                Updated {new Date(stats.lastUpdated).toLocaleTimeString()}
+                {!dataFresh && ' • delayed'}
+              </span>
+            )}
           <button
             onClick={refresh}
             disabled={refreshing}
@@ -338,10 +345,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {events.slice(0, 3).map((evt) => (
+          {events.length === 0 ? (
+            <p className="col-span-full text-xs text-slate-500 py-6 text-center">
+              No live headlines available right now. The feed will populate on the next refresh.
+            </p>
+          ) : (
+          events.slice(0, 3).map((evt) => (
             <div
               key={evt.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onNavigate(`/events?id=${evt.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onNavigate(`/events?id=${evt.id}`);
+                }
+              }}
               className="p-4 rounded-xl bg-[#161B2C] hover:bg-slate-800/80 border border-[#232A3D] cursor-pointer transition-colors"
             >
               <div className="flex items-center justify-between gap-2">
@@ -356,7 +376,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <h4 className="text-xs font-bold text-slate-200 mt-2 line-clamp-2">{evt.title}</h4>
               <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">{evt.region} • Impact Score: {evt.impactScore}/100</p>
             </div>
-          ))}
+          ))
+          )}
         </div>
       </div>
 
@@ -374,7 +395,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <Globe2 className="w-5 h-5 text-blue-400" />
               Global Risk Heatmap Preview
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Geographic threat distribution across 190+ countries</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Geographic threat distribution across {stats.trackedCountryCount || stats.topCountries.length} tracked countries
+            </p>
           </div>
           <span className="text-xs text-blue-400 font-bold flex items-center gap-1 group-hover:underline">
             Open Interactive Map <ArrowRight className="w-4 h-4" />
@@ -397,7 +420,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
                   }`}
                 >
-                  {c.name.split(' ')[0]}: {c.riskScore} {c.riskLevel}
+                  {displayCountryName(c.name)}: {c.riskScore} {c.riskLevel}
                 </span>
               ))}
             </div>

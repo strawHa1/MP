@@ -26,27 +26,11 @@ export async function fetchStockQuote(symbol: string): Promise<StockQuote> {
     quoteCache[cleanSymbol] = { quote: data, timestamp: Date.now() };
     return data;
   } catch (error) {
-    console.warn(`Failed to fetch live quote for ${cleanSymbol}, using cached or fallback data:`, error);
-    
-    // Return cached quote if available
+    console.warn(`Failed to fetch live quote for ${cleanSymbol}, using cached data:`, error);
     if (quoteCache[cleanSymbol]) {
       return quoteCache[cleanSymbol].quote;
     }
-
-    // Default fallback quote if fetch fails
-    const now = new Date();
-    return {
-      symbol: cleanSymbol,
-      price: 150.00,
-      change: 0.00,
-      percentChange: 0.00,
-      high: 152.00,
-      low: 148.50,
-      previousClose: 150.00,
-      volume: 12500000,
-      lastUpdated: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      isMarketOpen: false
-    };
+    throw error instanceof Error ? error : new Error(`No quote available for ${cleanSymbol}`);
   }
 }
 

@@ -10,6 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import { fetchHeadlines } from './newsApi.js';
 import { getGeminiApiKey } from './envConfig.js';
 import { GEMINI_DEFAULT_MODEL } from './geminiClient.js';
+import { fetchYahooQuote } from './yahooFinance.js';
 
 export type ImpactSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type ImpactSentiment = 'bearish' | 'neutral' | 'bullish';
@@ -271,36 +272,20 @@ async function fetchLiveQuote(ticker: string): Promise<{ price: number; changePc
         }
       }
     } catch {
-      /* fall through */
+      /* fall through to Yahoo */
     }
   }
 
-  // Simulated fallback aligned with server stock baselines
-  const BASELINES: Record<string, { price: number; prev: number }> = {
-    NVDA: { price: 124.5, prev: 121.2 },
-    AAPL: { price: 224.3, prev: 225.1 },
-    TSM: { price: 172.8, prev: 176.4 },
-    ASML: { price: 845, prev: 860.2 },
-    XOM: { price: 118.7, prev: 115.3 },
-    LMT: { price: 478.2, prev: 472 },
-    JPM: { price: 208.5, prev: 207.1 },
-    AMD: { price: 154.2, prev: 151.8 },
-    MSFT: { price: 442.1, prev: 440.5 },
-    AMZN: { price: 186.2, prev: 184.9 },
-    GOOGL: { price: 179.4, prev: 180.1 },
-    CVX: { price: 158.4, prev: 156.1 },
-    BA: { price: 178.6, prev: 181.2 },
-    RTX: { price: 102.3, prev: 101.5 }
-  };
-  const b = BASELINES[ticker] || { price: 150, prev: 148.5 };
-  const seed = (ticker.charCodeAt(0) * 7 + Math.floor(Date.now() / 60000)) % 100;
-  const jitter = (seed - 50) / 500;
-  const price = Number((b.price * (1 + jitter)).toFixed(2));
-  return {
-    price,
-    changePct: Number((((price - b.prev) / b.prev) * 100).toFixed(2)),
-    volume: 15000000 + seed * 50000
-  };
+  const yahoo = await fetchYahooQuote(ticker);
+  if (yahoo && yahoo.price > 0) {
+    return {
+      price: yahoo.price,
+      changePct: yahoo.percentChange,
+      volume: yahoo.volume
+    };
+  }
+
+  return null;
 }
 
 interface ClassificationResult {

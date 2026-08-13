@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ImpactStoreState, StockImpactRecord, ImpactSeverity } from '../types';
 
 const PRICE_POLL_MS = 30_000;
-const DATA_POLL_MS = 120_000;
 
 export type ImpactSortKey = 'severity' | 'impact' | 'recent';
 export type ImpactFilterSector = 'all' | string;
@@ -41,6 +40,7 @@ export function useImpactData() {
   const [filterRegion, setFilterRegion] = useState<ImpactFilterRegion>('all');
   const [refreshing, setRefreshing] = useState(false);
   const isMounted = useRef(true);
+  const refreshingRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +56,8 @@ export function useImpactData() {
   }, []);
 
   const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     setRefreshing(true);
     try {
       const data = await triggerImpactRefresh();
@@ -65,6 +67,7 @@ export function useImpactData() {
         setState((prev) => ({ ...prev, error: e?.message || 'Refresh failed' }));
       }
     } finally {
+      refreshingRef.current = false;
       if (isMounted.current) setRefreshing(false);
     }
   }, []);
@@ -72,12 +75,10 @@ export function useImpactData() {
   useEffect(() => {
     isMounted.current = true;
     load();
-    const dataTimer = setInterval(load, DATA_POLL_MS);
-    const priceTimer = setInterval(load, PRICE_POLL_MS);
+    const dataTimer = setInterval(load, PRICE_POLL_MS);
     return () => {
       isMounted.current = false;
       clearInterval(dataTimer);
-      clearInterval(priceTimer);
     };
   }, [load]);
 
@@ -97,8 +98,16 @@ export function useImpactData() {
     if (filterRegion !== 'all') list = list.filter((r) => r.region === filterRegion);
 
     list.sort((a, b) => {
-      if (sortBy === 'severity') return SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
-      if (sortBy === 'impact') return Math.abs(b.actualChangePct) - Math.abs(a.actualChangePct);
+      if (sortBy === 'severity') {
+        const sev = SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
+        if (sev !== 0) return sev;
+        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+      }
+      if (sortBy === 'impact') {
+        const mag = Math.abs(b.actualChangePct) - Math.abs(a.actualChangePct);
+        if (mag !== 0) return mag;
+        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+      }
       return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
     });
     return list;

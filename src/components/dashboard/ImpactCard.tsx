@@ -2,6 +2,7 @@ import React from 'react';
 import { StockImpactRecord } from '../../types';
 import { TrendingDown, TrendingUp, Minus, ExternalLink } from 'lucide-react';
 import { openExternalUrl } from '../../lib/externalLink';
+import { isImpactAligned } from '../../lib/dashboardMetrics';
 
 interface ImpactCardProps {
   record: StockImpactRecord;
@@ -19,8 +20,11 @@ export const ImpactCard: React.FC<ImpactCardProps> = ({ record, onClick }) => {
   const isUp = record.actualChangePct > 0;
   const isDown = record.actualChangePct < 0;
 
-  const predictedMid = (record.projectedImpactPct.min + record.projectedImpactPct.max) / 2;
-  const predictionDelta = Math.abs(predictedMid - record.actualChangePct);
+  const aligned = isImpactAligned(
+    record.actualChangePct,
+    record.projectedImpactPct.min,
+    record.projectedImpactPct.max
+  );
 
   return (
     <div
@@ -113,7 +117,7 @@ export const ImpactCard: React.FC<ImpactCardProps> = ({ record, onClick }) => {
             {record.actualChangePct.toFixed(1)}%
           </span>
         </div>
-        {predictionDelta < 2 && <span className="text-emerald-500/80 text-[9px]">✓ aligned</span>}
+        {aligned && <span className="text-emerald-500/80 text-[9px]">✓ aligned</span>}
       </div>
 
       <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">

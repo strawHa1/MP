@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NewsArticle, NewsFeedResponse, GlobalEvent } from '../types';
 import { extractAffectedTickers } from './affectedCompanyExtractor';
+import {
+  classifyEventSeverity,
+  impactScoreFromSeverity,
+  isHeadlineLive
+} from './dashboardMetrics';
 
 const headlinesCache: Record<string, { data: NewsFeedResponse; timestamp: number }> = {};
 const companyCache: Record<string, { data: NewsArticle[]; timestamp: number }> = {};
@@ -17,16 +22,9 @@ function inferCategory(text: string): GlobalEvent['category'] {
 }
 
 export function articleToGlobalEvent(article: NewsArticle, index: number): GlobalEvent {
-  const severity =
-    article.sentiment === 'negative' ? 'high' : article.sentiment === 'positive' ? 'low' : 'medium';
-  const impactScore =
-    article.sentiment === 'negative'
-      ? 65 + (index % 20)
-      : article.sentiment === 'positive'
-        ? 25 + (index % 15)
-        : 45 + (index % 20);
-
   const eventText = `${article.title} ${article.description}`;
+  const severity = classifyEventSeverity(article.sentiment, eventText);
+  const impactScore = impactScoreFromSeverity(severity);
 
   return {
     id: article.id,
@@ -43,7 +41,7 @@ export function articleToGlobalEvent(article: NewsArticle, index: number): Globa
     marketImpactSummary: article.description.slice(0, 200),
     url: article.url,
     sourceLinks: [{ name: article.source, url: article.url }],
-    isLive: true
+    isLive: isHeadlineLive(article.publishedAt)
   };
 }
 
