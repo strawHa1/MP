@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ShieldAlert,
@@ -14,7 +14,7 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 import { GlobalEvent, AlertItem } from '../../types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { RiskGauge } from '../common/RiskGauge';
@@ -22,7 +22,50 @@ import { ImpactOnStocksSection } from '../dashboard/ImpactOnStocksSection';
 import { RecommendedActionModal } from '../dashboard/RecommendedActionModal';
 import { useDashboardStats } from '../../lib/useDashboardStats';
 import { useDashboardIntelligence, RecommendedActionItem } from '../../lib/useDashboardIntelligence';
-import { displayCountryName, isDataFresh } from '../../lib/dashboardMetrics';
+import {
+  displayCountryName,
+  findTrendGaps,
+  formatTrendAxisDay,
+  isDataFresh,
+  trendGapCaption,
+  trendYAxisDomain
+} from '../../lib/dashboardMetrics';
+
+const EMPTY_TREND: { day: string; date?: string; score: number | null; source?: string }[] = [];
+const TREND_CHART_HEIGHT = 224;
+
+function FittedWidth({
+  className,
+  children
+}: {
+  className?: string;
+  children: (width: number) => React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = (next: number) => {
+      const rounded = Math.round(next);
+      if (rounded < 1) return;
+      setWidth((prev) => (Math.abs(prev - rounded) < 2 ? prev : rounded));
+    };
+    apply(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      apply(entries[0]?.contentRect.width ?? 0);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={className}>
+      {width > 0 ? children(width) : null}
+    </div>
+  );
+}
 
 interface DashboardPageProps {
   onNavigate: (path: string) => void;
@@ -42,6 +85,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [selectedAction, setSelectedAction] = useState<RecommendedActionItem | null>(null);
   const [actionConfirmed, setActionConfirmed] = useState<string | null>(null);
   const dataFresh = isDataFresh(stats?.lastUpdated);
+  const trendPoints = stats?.trend ?? EMPTY_TREND;
+  const trendGaps = useMemo(() => findTrendGaps(trendPoints), [trendPoints]);
+  const trendYDomain = useMemo(() => {
+    const scores = trendPoints
+      .map((p) => p.score)
+      .filter((s): s is number => s != null && Number.isFinite(s));
+    return trendYAxisDomain(scores);
+  }, [trendPoints]);
+  const trendChartData = useMemo(
+    () => trendPoints.map((p) => ({ ...p, date: p.date || p.day })),
+    [trendPoints]
+  );
+  const renderTrendDot = useCallback((dotProps: any) => {
+    if (dotProps.payload?.score == null || dotProps.cx == null || dotProps.cy == null) {
+      return false;
+    }
+    const estimated = dotProps.payload.source === 'headline-backfill';
+    return (
+      <circle
+        key={dotProps.index}
+        cx={dotProps.cx}
+        cy={dotProps.cy}
+        r={4}
+        fill={estimated ? '#F59E0B' : '#EF4444'}
+      />
+    );
+  }, []);
 
   const handleConfirmExecute = (action: RecommendedActionItem) => {
     const log = JSON.parse(localStorage.getItem('bs-action-log') || '[]') as object[];
@@ -264,9 +334,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Composite Index measuring geopolitical, maritime chokepoint, and commodity stress.
-                {stats.trend.length < 10 && (
+                {stats.trendSnapshotCount < 30 && (
                   <span className="block text-[10px] text-amber-400/90 mt-1">
-                    Building history — {stats.trend.length} day(s) recorded; daily snapshots accumulate automatically.
+                    Building history — {stats.trendSnapshotCount} day(s) recorded; daily snapshots accumulate automatically.
+                    Days without a snapshot are shown as a gap, not a flat line.
                   </span>
                 )}
               </p>
@@ -276,25 +347,82 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </span>
           </div>
 
-          <div className="h-56 w-full mt-2">
-            {stats.trend.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={stats.trend}>
-                <XAxis dataKey="day" stroke="#64748B" fontSize={11} tickLine={false} />
-                <YAxis domain={['auto', 'auto']} stroke="#64748B" fontSize={11} tickLine={false} />
+          <div className="h-56 w-full mt-2 relative">
+            {stats.trendSnapshotCount > 0 ? (
+            <>
+            <FittedWidth className="h-full w-full">
+              {(chartWidth) => (
+              <LineChart
+                width={chartWidth}
+                height={TREND_CHART_HEIGHT}
+                data={trendChartData}
+                margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
+              >
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748B"
+                  fontSize={11}
+                  tickLine={false}
+                  interval="preserveStartEnd"
+                  minTickGap={22}
+                  tickFormatter={formatTrendAxisDay}
+                />
+                <YAxis
+                  type="number"
+                  domain={trendYDomain}
+                  stroke="#64748B"
+                  fontSize={11}
+                  tickLine={false}
+                  allowDecimals={false}
+                  width={36}
+                />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#161B2C', borderColor: '#232A3D', borderRadius: '12px', color: '#FFF' }}
+                  formatter={(value: number | null, _name: string, item: any) => {
+                    if (value == null) return ['No snapshot recorded', 'Score'];
+                    const src = item?.payload?.source;
+                    if (src === 'headline-backfill') return [value, 'Score (from headlines)'];
+                    return [value, 'Score'];
+                  }}
+                  labelFormatter={(label: string, payload: any[]) => {
+                    const date = payload?.[0]?.payload?.date || label;
+                    const day = payload?.[0]?.payload?.day || formatTrendAxisDay(date);
+                    return `${day} (${date} UTC)`;
+                  }}
                 />
                 <Line
                   type="monotone"
                   dataKey="score"
                   stroke="#EF4444"
                   strokeWidth={3}
-                  dot={{ r: 4, fill: '#EF4444' }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  dot={renderTrendDot}
                   activeDot={{ r: 6, fill: '#FFF' }}
                 />
               </LineChart>
-            </ResponsiveContainer>
+              )}
+            </FittedWidth>
+            {trendChartData.length > 0 && trendGaps.map((gap) => {
+              const caption = trendGapCaption(gap);
+              const left = (gap.startIndex / trendChartData.length) * 100;
+              const width = (gap.days / trendChartData.length) * 100;
+              const showSubtitle = width >= 10;
+              return (
+                <div
+                  key={`gap-${gap.startKey}-${gap.endKey}`}
+                  className="absolute top-2 bottom-6 pointer-events-none flex flex-col items-center justify-center border-x border-dashed border-slate-600/50 bg-slate-500/[0.04]"
+                  style={{ left: `calc(36px + ${left} * (100% - 44px) / 100)`, width: `calc(${width} * (100% - 44px) / 100)` }}
+                  aria-hidden
+                >
+                  <span className="text-[10px] leading-tight text-slate-500 font-medium">{caption.title}</span>
+                  {showSubtitle && (
+                    <span className="text-[9px] leading-tight text-slate-600 mt-0.5">{caption.subtitle}</span>
+                  )}
+                </div>
+              );
+            })}
+            </>
             ) : (
               <div className="flex items-center justify-center h-full text-xs text-slate-500">
                 Collecting trend data from live news feeds...

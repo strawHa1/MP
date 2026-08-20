@@ -14,7 +14,7 @@ import {
 
 export interface TrendPoint {
   day: string;
-  score: number;
+  score: number | null;
   date?: string;
   source?: string;
 }
@@ -117,7 +117,10 @@ export function useDashboardStats(events: GlobalEvent[], alerts: AlertItem[]) {
           : 50;
 
       const trend: TrendPoint[] = trendData.points || [];
-      const trendHigh = trend.length > 0 ? Math.max(...trend.map((t) => t.score)) : globalRiskScore;
+      const recordedScores = trend
+        .map((t) => t.score)
+        .filter((s): s is number => s != null && Number.isFinite(s));
+      const trendHigh = recordedScores.length > 0 ? Math.max(...recordedScores) : globalRiskScore;
       const scoreDelta = scoreDeltaFromTrend(globalRiskScore, trend);
 
       const blackSwans = liveEvents.filter(isBlackSwanEvent);
@@ -175,7 +178,7 @@ export function useDashboardStats(events: GlobalEvent[], alerts: AlertItem[]) {
         sentiment: computeSentiment(articles),
         trend,
         trendHigh,
-        trendSnapshotCount: trendData.snapshotCount ?? trend.length,
+        trendSnapshotCount: trendData.recordedCount ?? recordedScores.length,
         topCountries,
         trackedCountryCount: countries.length,
         lastUpdated,

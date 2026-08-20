@@ -1,9 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { LiveCountryRisk } from '../types';
 
-/** Shared by the World Risk Map timer and the "Auto-refresh Xm" label. */
+/**
+ * Single source of truth for World Risk Map auto-refresh.
+ * Change this one value to retarget cadence (e.g. 24 * 60 * 60 * 1000 for daily).
+ * The label is derived from the same constant so it cannot drift.
+ */
 export const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-export const AUTO_REFRESH_MINUTES = Math.round(AUTO_REFRESH_INTERVAL_MS / 60_000);
+
+export function formatIntervalLabel(ms: number): string {
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (ms >= day && ms % day === 0) return `${ms / day}d`;
+  if (ms >= hour && ms % hour === 0) return `${ms / hour}h`;
+  const minutes = Math.max(1, Math.round(ms / minute));
+  return `${minutes}m`;
+}
+
+export const AUTO_REFRESH_LABEL = formatIntervalLabel(AUTO_REFRESH_INTERVAL_MS);
 
 export function useCountryRisk() {
   const [countries, setCountries] = useState<LiveCountryRisk[]>([]);
@@ -105,6 +120,8 @@ export function useCountryRisk() {
     void load(true);
   }, [clearTimer, load]);
 
+  const dismissError = useCallback(() => setError(null), []);
+
   return {
     countries,
     lastUpdated,
@@ -112,6 +129,7 @@ export function useCountryRisk() {
     refreshing,
     error,
     changedIds,
-    refresh
+    refresh,
+    dismissError
   };
 }

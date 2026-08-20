@@ -21,8 +21,10 @@ import {
 import { searchMarketSymbols, refreshSearchQuotes, initSearchUniverse } from './searchService.js';
 import {
   getTrendHistory,
-  backfillTrendFromHeadlines,
+  hasSnapshot,
   initDashboardTrendService,
+  runDailySnapshotJob,
+  setTrendScoreProvider,
   startDashboardTrendCron
 } from './dashboardTrendService.js';
 import { getDashboardIntelligence } from './dashboardIntelligenceService.js';
@@ -187,7 +189,12 @@ app.get('/api/companies/:ticker', async (req, res) => {
 app.get('/api/dashboard/trend', async (req, res) => {
   try {
     const force = req.query.refresh === 'true';
-    if (force) await backfillTrendFromHeadlines();
+    if (force || !hasSnapshot()) {
+      const job = await runDailySnapshotJob(force ? 'manual' : 'api');
+      if (!job.ok) {
+        console.warn('[Dashboard] trend fetch continued without a new snapshot:', job.error);
+      }
+    }
     const trend = getTrendHistory(30);
     res.set('Cache-Control', 'no-store');
     res.json({ ...trend, lastUpdated: new Date().toISOString() });
@@ -692,6 +699,16 @@ async function startServer() {
     startImpactCron();
     startImpactPricePolling(30_000);
     initSearchUniverse();
+    setTrendScoreProvider(async () => {
+      const data = await getLiveCountryRisk(true);
+      const countries = data?.countries || [];
+      if (countries.length === 0) {
+        throw new Error('No country risk scores available for daily snapshot');
+      }
+      return Math.round(
+        countries.reduce((s: number, c: { riskScore: number }) => s + c.riskScore, 0) / countries.length
+      );
+    });
     initDashboardTrendService();
     startDashboardTrendCron();
   });

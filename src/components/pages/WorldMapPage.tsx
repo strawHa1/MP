@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Map, Globe2, Filter, Loader2, RefreshCw } from 'lucide-react';
 import { SeverityBadge } from '../common/SeverityBadge';
-import { AUTO_REFRESH_MINUTES, useCountryRisk } from '../../lib/useCountryRisk';
+import { AUTO_REFRESH_LABEL, useCountryRisk } from '../../lib/useCountryRisk';
 
 interface WorldMapPageProps {
   onNavigate: (path: string) => void;
 }
 
 export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
-  const { countries, lastUpdated, loading, refreshing, error, changedIds, refresh } = useCountryRisk();
+  const { countries, lastUpdated, loading, refreshing, error, changedIds, refresh, dismissError } = useCountryRisk();
   const [selectedCountryId, setSelectedCountryId] = useState<string | null>(null);
   const [filterLevel, setFilterLevel] = useState('all');
 
@@ -67,6 +67,19 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {error && countries.length > 0 && (
+            <div className="lg:col-span-3 flex items-center justify-between gap-3 bg-[#0F1420] border border-amber-500/30 text-amber-300 text-xs px-4 py-2.5 rounded-xl">
+              <span>Refresh failed — showing last known good data. Next auto-refresh will retry.</span>
+              <div className="flex items-center gap-3 shrink-0">
+                <button type="button" onClick={refresh} className="text-blue-400 hover:underline font-semibold">
+                  Retry now
+                </button>
+                <button type="button" onClick={dismissError} className="text-slate-400 hover:text-white">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
           <div className="lg:col-span-2 bg-[#0F1420] border border-[#232A3D] rounded-2xl p-6 shadow-2xl min-h-[480px] flex flex-col">
             <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-[#232A3D] pb-3">
               <span className="flex items-center gap-2"><Globe2 className="w-4 h-4 text-blue-400" /> {filtered.length} tracked regions</span>
@@ -77,7 +90,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
                   <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${refreshing ? 'animate-pulse' : ''}`} />
                   Live Feed
                 </span>
-                <span className="text-emerald-500">Auto-refresh {AUTO_REFRESH_MINUTES}m</span>
+                <span className="text-emerald-500">Auto-refresh {AUTO_REFRESH_LABEL}</span>
               </span>
             </div>
 

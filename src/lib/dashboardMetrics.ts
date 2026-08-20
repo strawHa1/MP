@@ -123,16 +123,14 @@ export function isBlackSwanEvent(event: {
 
 export function scoreDeltaFromTrend(
   currentScore: number,
-  trend: { score: number }[]
+  trend: { score: number | null }[]
 ): number | null {
-  if (trend.length === 0) return null;
-  const last = trend[trend.length - 1];
-  if (!last || !Number.isFinite(last.score)) return null;
+  const real = trend.filter((t): t is { score: number } => t.score != null && Number.isFinite(t.score));
+  if (real.length === 0) return null;
+  const last = real[real.length - 1];
   if (last.score === currentScore) {
-    if (trend.length < 2) return null;
-    const prior = trend[trend.length - 2];
-    if (!prior || !Number.isFinite(prior.score)) return null;
-    return Math.round(currentScore - prior.score);
+    if (real.length < 2) return null;
+    return Math.round(currentScore - real[real.length - 2].score);
   }
   return Math.round(currentScore - last.score);
 }
@@ -160,4 +158,131 @@ export function uniqueTitles<T extends { title?: string; id?: string }>(items: T
     out.push(item);
   }
   return out;
+}
+
+export interface TrendGapPoint {
+  day: string;
+  date?: string;
+  score: number | null;
+}
+
+export interface TrendGap {
+  startKey: string;
+  endKey: string;
+  startLabel: string;
+  endLabel: string;
+  startIndex: number;
+  endIndex: number;
+  days: number;
+  kind: 'interior' | 'leading' | 'trailing';
+}
+
+export function formatTrendAxisDay(dateOrDay: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateOrDay)) {
+    const d = new Date(`${dateOrDay}T12:00:00Z`);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+  return dateOrDay;
+}
+
+function trendPointKey(point: TrendGapPoint): string {
+  return point.date || point.day;
+}
+
+function trendPointLabel(point: TrendGapPoint): string {
+  return point.day || formatTrendAxisDay(trendPointKey(point));
+}
+
+/** Contiguous runs of missing snapshots. Gaps shorter than minDays are omitted. */
+export function findTrendGaps(points: TrendGapPoint[], minDays = 2): TrendGap[] {
+  const gaps: TrendGap[] = [];
+  let i = 0;
+  while (i < points.length) {
+    if (points[i].score != null) {
+      i += 1;
+      continue;
+    }
+    const start = i;
+    while (i < points.length && points[i].score == null) i += 1;
+    const end = i - 1;
+    const days = end - start + 1;
+    if (days < minDays) continue;
+
+    const hasLeft = start > 0 && points[start - 1].score != null;
+    const hasRight = end < points.length - 1 && points[end + 1].score != null;
+    const kind: TrendGap['kind'] = hasLeft && hasRight ? 'interior' : start === 0 ? 'leading' : 'trailing';
+
+    gaps.push({
+      startKey: trendPointKey(points[start]),
+      endKey: trendPointKey(points[end]),
+      startLabel: trendPointLabel(points[start]),
+      endLabel: trendPointLabel(points[end]),
+      startIndex: start,
+      endIndex: end,
+      days,
+      kind
+    });
+  }
+  return gaps;
+}
+
+export function trendGapCaption(gap: TrendGap): { title: string; subtitle: string } {
+  const subtitle =
+    gap.startLabel === gap.endLabel
+      ? gap.startLabel
+      : compactDayRange(gap.startLabel, gap.endLabel);
+  return {
+    title: gap.kind === 'interior' ? 'Gap' : 'No data',
+    subtitle
+  };
+}
+
+function compactDayRange(startLabel: string, endLabel: string): string {
+  const startParts = startLabel.split(' ');
+  const endParts = endLabel.split(' ');
+  if (startParts.length === 2 && endParts.length === 2 && startParts[0] === endParts[0]) {
+    return `${startParts[0]} ${startParts[1]}–${endParts[1]}`;
+  }
+  return `${startLabel}–${endLabel}`;
+}
+
+const Y_MIN_SPAN = 25;
+const Y_PAD_RATIO = 0.18;
+const Y_PAD_FLOOR = 3;
+const Y_STEP = 5;
+
+/**
+ * Y-axis domain from recorded scores only. Pads the range, enforces a minimum
+ * span so small noise isn't exaggerated, and stays within 0–100.
+ */
+export function trendYAxisDomain(scores: number[]): [number, number] {
+  const finite = scores.filter((s) => Number.isFinite(s));
+  if (finite.length === 0) return [0, 100];
+
+  const rawMin = Math.min(...finite);
+  const rawMax = Math.max(...finite);
+  const span = rawMax - rawMin;
+  const pad = Math.max(span * Y_PAD_RATIO, Y_PAD_FLOOR);
+
+  let lo = rawMin - pad;
+  let hi = rawMax + pad;
+
+  if (hi - lo < Y_MIN_SPAN) {
+    const mid = (rawMin + rawMax) / 2;
+    lo = mid - Y_MIN_SPAN / 2;
+    hi = mid + Y_MIN_SPAN / 2;
+  }
+
+  lo = Math.floor(lo / Y_STEP) * Y_STEP;
+  hi = Math.ceil(hi / Y_STEP) * Y_STEP;
+  if (hi - lo < Y_MIN_SPAN) hi = lo + Y_MIN_SPAN;
+
+  lo = Math.max(0, lo);
+  hi = Math.min(100, hi);
+  if (hi - lo < Y_MIN_SPAN) {
+    if (lo === 0) hi = Math.min(100, Y_MIN_SPAN);
+    else if (hi === 100) lo = Math.max(0, 100 - Y_MIN_SPAN);
+  }
+  if (lo >= hi) return [0, 100];
+  return [lo, hi];
 }

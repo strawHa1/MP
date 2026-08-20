@@ -9,10 +9,14 @@ import {
   isBlackSwanEvent,
   isHeadlineLive,
   isImpactAligned,
+  findTrendGaps,
   roundPercentsTo100,
   scoreDeltaFromTrend,
+  trendGapCaption,
+  trendYAxisDomain,
   uniqueTitles
 } from '../src/lib/dashboardMetrics.ts';
+import { utcDayRange, utcDateKey, formatChartDay } from '../dashboardTrendService.ts';
 
 assert.equal(displayCountryName('United States'), 'USA');
 assert.equal(displayCountryName('United Kingdom'), 'UK');
@@ -38,6 +42,7 @@ assert.equal(isImpactAligned(-1.2, -3, -0.5), true);
 assert.equal(isImpactAligned(4, -3, -0.5), false);
 assert.equal(isImpactAligned(1.0, 0.8, 1.4), true);
 
+assert.equal(scoreDeltaFromTrend(60, [{ score: 50 }, { score: null }, { score: 55 }]), 5);
 assert.equal(scoreDeltaFromTrend(60, [{ score: 50 }, { score: 55 }]), 5);
 assert.equal(scoreDeltaFromTrend(60, [{ score: 50 }, { score: 60 }]), 10);
 assert.equal(scoreDeltaFromTrend(60, [{ score: 60 }]), null);
@@ -53,5 +58,53 @@ const deduped = uniqueTitles([
   { title: 'Other' }
 ]);
 assert.equal(deduped.length, 2);
+
+const window = utcDayRange(30, '2026-08-20');
+assert.equal(window.length, 30);
+assert.equal(window[0], '2026-07-22');
+assert.equal(window[window.length - 1], '2026-08-20');
+assert.equal(utcDateKey(new Date('2026-08-20T23:30:00Z')), '2026-08-20');
+assert.equal(formatChartDay('2026-08-20'), 'Aug 20');
+
+const gapped = [
+  { day: 'Jul 22', date: '2026-07-22', score: null },
+  { day: 'Jul 23', date: '2026-07-23', score: null },
+  { day: 'Aug 10', date: '2026-08-10', score: 38 },
+  { day: 'Aug 13', date: '2026-08-13', score: 39 },
+  { day: 'Aug 14', date: '2026-08-14', score: null },
+  { day: 'Aug 15', date: '2026-08-15', score: null },
+  { day: 'Aug 16', date: '2026-08-16', score: null },
+  { day: 'Aug 19', date: '2026-08-19', score: 52 },
+  { day: 'Aug 20', date: '2026-08-20', score: 39 }
+];
+const gaps = findTrendGaps(gapped, 2);
+assert.equal(gaps.length, 2);
+assert.equal(gaps[0].kind, 'leading');
+assert.equal(gaps[0].startKey, '2026-07-22');
+assert.equal(gaps[1].kind, 'interior');
+assert.equal(gaps[1].days, 3);
+assert.equal(gaps[1].startIndex, 4);
+assert.equal(gaps[1].endIndex, 6);
+assert.equal(gaps[1].startLabel, 'Aug 14');
+assert.equal(gaps[1].endLabel, 'Aug 16');
+assert.deepEqual(trendGapCaption(gaps[1]), { title: 'Gap', subtitle: 'Aug 14–16' });
+assert.equal(findTrendGaps(gapped, 4).length, 0);
+
+const [yLo, yHi] = trendYAxisDomain([38, 54, 52, 39, 60]);
+assert.ok(yLo <= 38);
+assert.ok(yHi >= 60);
+assert.ok(yHi - yLo >= 25);
+assert.ok(yLo >= 0 && yHi <= 100);
+assert.notDeepEqual([yLo, yHi], [0, 100]);
+
+const tight = trendYAxisDomain([50, 52]);
+assert.ok(tight[1] - tight[0] >= 25);
+assert.ok(tight[0] <= 50 && tight[1] >= 52);
+
+const floor = trendYAxisDomain([0, 2]);
+assert.equal(floor[0], 0);
+assert.ok(floor[1] >= 25);
+
+assert.deepEqual(trendYAxisDomain([]), [0, 100]);
 
 console.log('dashboardMetrics: all checks passed');

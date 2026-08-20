@@ -15,6 +15,7 @@ import { SearchPage } from './components/pages/SearchPage';
 import { NotificationsPage } from './components/pages/NotificationsPage';
 import { ProfilePage } from './components/pages/ProfilePage';
 import { SettingsPage } from './components/pages/SettingsPage';
+import { PageErrorBoundary } from './components/common/PageErrorBoundary';
 
 import { INITIAL_EVENTS, INITIAL_COMPANIES, INITIAL_ALERTS } from './data/mockData';
 import { GlobalEvent, CompanyRisk, AlertItem } from './types';
@@ -113,6 +114,7 @@ export function App() {
 
         {/* Dynamic Page Views */}
         <main className="flex-1 overflow-y-auto custom-scrollbar">
+          <PageErrorBoundary key={baseRoute}>
           {baseRoute === '/dashboard' && (
             <DashboardPage
               onNavigate={navigate}
@@ -202,6 +204,7 @@ export function App() {
               onUpdateTheme={setTheme}
             />
           )}
+          </PageErrorBoundary>
         </main>
       </div>
     </div>
