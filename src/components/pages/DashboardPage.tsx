@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   Compass,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 import { GlobalEvent, AlertItem } from '../../types';
@@ -20,7 +21,7 @@ import { SeverityBadge } from '../common/SeverityBadge';
 import { RiskGauge } from '../common/RiskGauge';
 import { ImpactOnStocksSection } from '../dashboard/ImpactOnStocksSection';
 import { RecommendedActionModal } from '../dashboard/RecommendedActionModal';
-import { useDashboardStats } from '../../lib/useDashboardStats';
+import { useDashboardStats, type TrendPoint } from '../../lib/useDashboardStats';
 import { useDashboardIntelligence, RecommendedActionItem } from '../../lib/useDashboardIntelligence';
 import {
   displayCountryName,
@@ -31,8 +32,55 @@ import {
   trendYAxisDomain
 } from '../../lib/dashboardMetrics';
 
-const EMPTY_TREND: { day: string; date?: string; score: number | null; source?: string }[] = [];
+const EMPTY_TREND: TrendPoint[] = [];
 const TREND_CHART_HEIGHT = 224;
+
+function SnapshotJobStatus({
+  job
+}: {
+  job: {
+    ok: boolean;
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastError: string | null;
+    unrecoverableDays: string[];
+  } | null;
+}) {
+  if (!job) return null;
+  const when = job.lastSuccessAt
+    ? new Date(job.lastSuccessAt).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      })
+    : null;
+  if (job.lastAttemptAt && !job.ok) {
+    return (
+      <span
+        className="text-[10px] font-mono text-amber-400 flex items-center gap-1"
+        title={job.lastError || 'Snapshot job failed'}
+      >
+        <AlertTriangle className="w-3 h-3" />
+        last attempt failed
+      </span>
+    );
+  }
+  if (when) {
+    const gaps = job.unrecoverableDays?.length ?? 0;
+    return (
+      <span
+        className={`text-[10px] font-mono flex items-center gap-1 ${
+          gaps > 0 ? 'text-amber-400' : 'text-emerald-400'
+        }`}
+        title={gaps > 0 ? `Unrecoverable gaps: ${job.unrecoverableDays.join(', ')}` : 'Daily snapshot job healthy'}
+      >
+        last snapshot: {when} {gaps > 0 ? '⚠' : '✓'}
+      </span>
+    );
+  }
+  return <span className="text-[10px] font-mono text-slate-500">snapshot job: waiting</span>;
+}
 
 function FittedWidth({
   className,
@@ -94,21 +142,41 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return trendYAxisDomain(scores);
   }, [trendPoints]);
   const trendChartData = useMemo(
-    () => trendPoints.map((p) => ({ ...p, date: p.date || p.day })),
+    () =>
+      trendPoints.map((p) => ({
+        ...p,
+        date: p.date || p.day,
+        recordedScore:
+          p.recordedScore !== undefined
+            ? p.recordedScore
+            : p.source === 'estimated' || p.source === 'gap'
+              ? null
+              : p.score
+      })),
     [trendPoints]
   );
   const renderTrendDot = useCallback((dotProps: any) => {
-    if (dotProps.payload?.score == null || dotProps.cx == null || dotProps.cy == null) {
-      return false;
+    const src = dotProps.payload?.source;
+    const score = dotProps.payload?.score;
+    if (score == null || dotProps.cx == null || dotProps.cy == null) return false;
+    if (src === 'estimated') {
+      return (
+        <circle
+          key={`est-${dotProps.index}`}
+          cx={dotProps.cx}
+          cy={dotProps.cy}
+          r={2.5}
+          fill="#64748B"
+        />
+      );
     }
-    const estimated = dotProps.payload.source === 'headline-backfill';
     return (
       <circle
         key={dotProps.index}
         cx={dotProps.cx}
         cy={dotProps.cy}
         r={4}
-        fill={estimated ? '#F59E0B' : '#EF4444'}
+        fill={src === 'headline-backfill' ? '#F59E0B' : '#EF4444'}
       />
     );
   }, []);
@@ -334,17 +402,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Composite Index measuring geopolitical, maritime chokepoint, and commodity stress.
-                {stats.trendSnapshotCount < 30 && (
-                  <span className="block text-[10px] text-amber-400/90 mt-1">
-                    Building history — {stats.trendSnapshotCount} day(s) recorded; daily snapshots accumulate automatically.
-                    Days without a snapshot are shown as a gap, not a flat line.
-                  </span>
-                )}
+                <span className="block text-[10px] text-slate-500 mt-1">
+                  {stats.trendSnapshotCount} recorded day{stats.trendSnapshotCount === 1 ? '' : 's'}
+                  {stats.trendEstimatedCount > 0
+                    ? ` · ${stats.trendEstimatedCount} estimated (dashed) to complete the 30-day window`
+                    : ''}
+                  . Daily snapshots run automatically at 16:05 America/New_York (after US equity close).
+                </span>
               </p>
             </div>
-            <span className="text-xs font-mono font-bold text-slate-300 bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg">
-              30D HIGH: {stats.trendHigh}
-            </span>
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-xs font-mono font-bold text-slate-300 bg-[#161B2C] border border-[#232A3D] px-2.5 py-1 rounded-lg">
+                30D HIGH: {stats.trendHigh}
+              </span>
+              <SnapshotJobStatus job={stats.snapshotJob} />
+            </div>
           </div>
 
           <div className="h-56 w-full mt-2 relative">
@@ -378,9 +450,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#161B2C', borderColor: '#232A3D', borderRadius: '12px', color: '#FFF' }}
-                  formatter={(value: number | null, _name: string, item: any) => {
+                  formatter={(value: number | null, name: string, item: any) => {
+                    if (name === 'recordedScore') return null;
                     if (value == null) return ['No snapshot recorded', 'Score'];
                     const src = item?.payload?.source;
+                    if (src === 'estimated') return [value, 'Estimated (no snapshot)'];
                     if (src === 'headline-backfill') return [value, 'Score (from headlines)'];
                     return [value, 'Score'];
                   }}
@@ -393,17 +467,29 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 <Line
                   type="monotone"
                   dataKey="score"
+                  stroke="#64748B"
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  connectNulls
+                  isAnimationActive={false}
+                  dot={renderTrendDot}
+                  activeDot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="recordedScore"
                   stroke="#EF4444"
                   strokeWidth={3}
                   connectNulls={false}
                   isAnimationActive={false}
-                  dot={renderTrendDot}
+                  dot={false}
                   activeDot={{ r: 6, fill: '#FFF' }}
                 />
               </LineChart>
               )}
             </FittedWidth>
-            {trendChartData.length > 0 && trendGaps.map((gap) => {
+            {trendChartData.length > 0 &&
+              trendGaps.map((gap) => {
               const caption = trendGapCaption(gap);
               const left = (gap.startIndex / trendChartData.length) * 100;
               const width = (gap.days / trendChartData.length) * 100;
@@ -524,7 +610,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               Global Risk Heatmap Preview
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Geographic threat distribution across {stats.trackedCountryCount || stats.topCountries.length} tracked countries
+              Geographic threat distribution across {stats.trackedCountryCount || stats.mapCountries.length} tracked countries
+              · 30-day history updates daily
             </p>
           </div>
           <span className="text-xs text-blue-400 font-bold flex items-center gap-1 group-hover:underline">
@@ -533,26 +620,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         {/* Mini World Preview Graphic */}
-        <div className="h-40 bg-[#161B2C] rounded-xl border border-[#232A3D] flex items-center justify-center relative overflow-hidden">
+        <div className="h-40 bg-[#161B2C] rounded-xl border border-[#232A3D] relative overflow-hidden p-3">
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#3B82F6_1px,transparent_1px)] [background-size:16px_16px]" />
-          <div className="z-10 text-center space-y-2">
-            <div className="flex justify-center gap-4 text-xs font-mono flex-wrap">
-              {stats.topCountries.slice(0, 3).map((c) => (
-                <span
+          <div className="relative z-10 h-full grid grid-cols-4 sm:grid-cols-7 gap-2">
+            {(stats.mapCountries?.length ? stats.mapCountries : stats.topCountries).map((c) => {
+              const tone =
+                c.riskLevel === 'Critical'
+                  ? 'bg-red-500/25 border-red-500/40 text-red-300'
+                  : c.riskLevel === 'High'
+                    ? 'bg-amber-500/20 border-amber-500/35 text-amber-300'
+                    : c.riskLevel === 'Medium'
+                      ? 'bg-blue-500/20 border-blue-500/30 text-blue-300'
+                      : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300';
+              return (
+                <div
                   key={c.id}
-                  className={`px-2.5 py-1 rounded border ${
-                    c.riskLevel === 'Critical'
-                      ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                      : c.riskLevel === 'High'
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                  }`}
+                  className={`rounded-lg border px-1.5 py-1 flex flex-col justify-center ${tone}`}
                 >
-                  {displayCountryName(c.name)}: {c.riskScore} {c.riskLevel}
-                </span>
-              ))}
-            </div>
-            <p className="text-xs text-slate-400">Click to enter the full GIS Geographic Threat Studio</p>
+                  <span className="text-[10px] font-bold truncate">{displayCountryName(c.name)}</span>
+                  <span className="text-[10px] font-mono">{c.riskScore}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -1,24 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   ShieldAlert,
   CheckCircle2,
-  Bell,
   Clock,
-  Filter,
   Check,
   Sliders,
-  AlertTriangle,
   Trash2
 } from 'lucide-react';
 import { AlertItem } from '../../types';
-import { INITIAL_ALERTS } from '../../data/mockData';
 import { SeverityBadge } from '../common/SeverityBadge';
-import {
-  getUserAlerts,
-  removeUserAlert,
-  toAlertItem,
-  USER_ALERTS_UPDATED_EVENT
-} from '../../lib/alertsService';
+import { removeUserAlert } from '../../lib/alertsService';
 
 /** Alerts created by the user in the AI Assistant chat carry this id prefix. */
 const isCustomAlert = (id: string) => id.startsWith('ua-');
@@ -26,58 +17,26 @@ const isCustomAlert = (id: string) => id.startsWith('ua-');
 interface AlertsPageProps {
   onNavigate: (path: string) => void;
   userRiskTolerance?: number;
+  alerts: AlertItem[];
+  loading?: boolean;
+  error?: string | null;
+  onToggleRead: (id: string) => void;
+  onMarkAllRead: () => void;
 }
 
 export const AlertsPage: React.FC<AlertsPageProps> = ({
   onNavigate,
-  userRiskTolerance = 55
+  userRiskTolerance = 55,
+  alerts,
+  loading = false,
+  error = null,
+  onToggleRead,
+  onMarkAllRead
 }) => {
-  const [alerts, setAlerts] = useState<AlertItem[]>([
-    {
-      id: 'alt-risk-warning-1',
-      title: 'CAPITAL LOSS WARNING: NVDA Exposure Risk Flagged',
-      severity: 'critical',
-      message: `NVIDIA ($NVDA) composite risk signal has degraded. Threat score (78/100) exceeds your configured risk tolerance threshold (${userRiskTolerance}/100). Elevated probability of position drawdown due to Taiwan export tariff escalation.`,
-      read: false,
-      createdAt: '3 mins ago',
-      category: 'Capital Loss Warning',
-      relatedEntitySymbol: 'NVDA'
-    },
-    ...INITIAL_ALERTS
-  ]);
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
-
-  // Merge in alerts the user created from the AI Assistant chat. The service
-  // fires USER_ALERTS_UPDATED_EVENT so new alerts appear without a reload.
-  useEffect(() => {
-    const sync = () => {
-      const customItems = getUserAlerts().map(toAlertItem);
-      setAlerts((prev) => {
-        const readState = new Map(prev.map((a) => [a.id, a.read]));
-        const platformAlerts = prev.filter((a) => !isCustomAlert(a.id));
-        return [
-          ...customItems.map((item) => ({ ...item, read: readState.get(item.id) ?? item.read })),
-          ...platformAlerts
-        ];
-      });
-    };
-
-    sync();
-    window.addEventListener(USER_ALERTS_UPDATED_EVENT, sync);
-    return () => window.removeEventListener(USER_ALERTS_UPDATED_EVENT, sync);
-  }, []);
 
   const deleteCustomAlert = (id: string) => {
     removeUserAlert(id);
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-  };
-
-  const markAllRead = () => {
-    setAlerts(alerts.map((a) => ({ ...a, read: true })));
-  };
-
-  const toggleRead = (id: string) => {
-    setAlerts(alerts.map((a) => (a.id === id ? { ...a, read: !a.read } : a)));
   };
 
   const filteredAlerts = alerts.filter((a) => {
@@ -92,7 +51,6 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto font-sans">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-rose-600 dark:text-red-400 font-bold uppercase tracking-wider">
@@ -101,12 +59,12 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">Alerts Center</h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
-            Real-time capital loss warnings & signal degradation alerts (Calibrated to {userRiskTolerance}/100 threshold)
+            Live capital loss warnings & signal degradation alerts (Calibrated to {userRiskTolerance}/100 threshold)
           </p>
         </div>
 
         <button
-          onClick={markAllRead}
+          onClick={onMarkAllRead}
           className="px-4 py-2 rounded-xl bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] hover:border-slate-400 text-slate-800 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-2 w-fit shadow-sm"
         >
           <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -114,7 +72,6 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
         </button>
       </div>
 
-      {/* Filter Pills */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
         {[
           { id: 'all', label: 'All Notifications' },
@@ -137,7 +94,14 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
         ))}
       </div>
 
-      {/* Alerts List */}
+      {loading && alerts.length === 0 && (
+        <p className="text-xs text-slate-500">Loading live alerts…</p>
+      )}
+
+      {error && alerts.length > 0 && (
+        <p className="text-[11px] text-amber-500 font-mono">Live feed paused ({error}). Showing last known alerts.</p>
+      )}
+
       <div className="space-y-3">
         {filteredAlerts.map((alt) => (
           <div
@@ -165,7 +129,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
                   {alt.createdAt}
                 </span>
                 <button
-                  onClick={() => toggleRead(alt.id)}
+                  onClick={() => onToggleRead(alt.id)}
                   className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                   title="Toggle Read"
                 >
@@ -202,6 +166,14 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({
             )}
           </div>
         ))}
+
+        {filteredAlerts.length === 0 && !loading && (
+          <div className="p-12 text-center text-slate-500 text-xs bg-white dark:bg-[#0F1420] border border-slate-200 dark:border-[#232A3D] rounded-2xl">
+            {error
+              ? 'Could not load live alerts. The last successful list will reappear on the next poll.'
+              : 'No qualifying live alerts yet. New high/critical impact signals, black-swan headlines, and risk-score jumps will appear here automatically.'}
+          </div>
+        )}
       </div>
     </div>
   );

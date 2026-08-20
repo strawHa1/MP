@@ -42,6 +42,8 @@ export interface LiveCountryRisk {
   keyRisks: string[];
   scoreChanged?: boolean;
   previousScore?: number;
+  sparkline?: (number | null)[];
+  monthDelta?: number | null;
 }
 
 export interface GlobalEvent {
@@ -183,11 +185,15 @@ export interface AlertItem {
   severity: RiskSeverity;
   message: string;
   read: boolean;
+  /** Display label, always derived from createdAtIso. */
   createdAt: string;
+  /** Real event/record time (ISO). Relative labels must use this, not a fake clock. */
+  createdAtIso?: string;
   category: string;
   relatedEntitySymbol?: string;
   targetType?: 'event' | 'company' | 'sector' | 'portfolio';
   targetId?: string;
+  source?: 'impact' | 'headline' | 'country' | 'user' | 'user-trigger';
 }
 
 export interface ReportItem {

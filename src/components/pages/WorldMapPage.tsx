@@ -3,6 +3,31 @@ import { Map, Globe2, Filter, Loader2, RefreshCw } from 'lucide-react';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { AUTO_REFRESH_LABEL, useCountryRisk } from '../../lib/useCountryRisk';
 
+function MonthSparkline({ values }: { values?: (number | null)[] }) {
+  if (!values || values.length < 2) return null;
+  const nums = values.filter((v): v is number => v != null);
+  if (nums.length < 2) return null;
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const span = Math.max(1, max - min);
+  const w = 72;
+  const h = 22;
+  const pts = values
+    .map((v, i) => {
+      if (v == null) return null;
+      const x = (i / (values.length - 1)) * w;
+      const y = h - ((v - min) / span) * (h - 2) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <svg width={w} height={h} className="overflow-visible" aria-hidden>
+      <polyline fill="none" stroke="#60A5FA" strokeWidth="1.5" points={pts} />
+    </svg>
+  );
+}
+
 interface WorldMapPageProps {
   onNavigate: (path: string) => void;
 }
@@ -34,6 +59,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
           <p className="text-slate-400 text-xs mt-0.5">
             Live regional risk from news & impact pipeline
             {lastUpdated && ` • Updated ${new Date(lastUpdated).toLocaleTimeString()}`}
+            {' · '}30-day history snapshots daily at 16:05 ET (after US close)
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -90,7 +116,7 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
                   <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${refreshing ? 'animate-pulse' : ''}`} />
                   Live Feed
                 </span>
-                <span className="text-emerald-500">Auto-refresh {AUTO_REFRESH_LABEL}</span>
+                  <span className="text-emerald-500">Live {AUTO_REFRESH_LABEL} · history daily</span>
               </span>
             </div>
 
@@ -118,7 +144,17 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
                         <span className="text-xs font-mono font-bold">{cnt.riskScore}/100</span>
                       </div>
                       <div className="text-sm font-extrabold text-white mt-1.5 line-clamp-1">{cnt.name}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">{cnt.eventsCount} events</div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-[10px] text-slate-400 font-mono">{cnt.eventsCount} events</span>
+                        {cnt.monthDelta != null && (
+                          <span className={`text-[10px] font-mono ${cnt.monthDelta > 0 ? 'text-red-400' : cnt.monthDelta < 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            30d {cnt.monthDelta > 0 ? '+' : ''}{cnt.monthDelta}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1">
+                        <MonthSparkline values={cnt.sparkline} />
+                      </div>
                     </div>
                   );
                 })}
@@ -151,6 +187,20 @@ export const WorldMapPage: React.FC<WorldMapPageProps> = ({ onNavigate }) => {
                   <div className="bg-[#161B2C] border border-[#232A3D] p-3 rounded-xl">
                     <span className="text-[10px] text-slate-400 uppercase">Active Events</span>
                     <div className="text-xl font-extrabold text-blue-400 mt-0.5">{active.eventsCount}</div>
+                  </div>
+                </div>
+
+                <div className="bg-[#161B2C] border border-[#232A3D] p-3 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-mono">30-day score</span>
+                    {active.monthDelta != null && (
+                      <span className={`text-[10px] font-mono ${active.monthDelta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {active.monthDelta > 0 ? '+' : ''}{active.monthDelta} vs month start
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2">
+                    <MonthSparkline values={active.sparkline} />
                   </div>
                 </div>
 

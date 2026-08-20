@@ -17,9 +17,10 @@ import { ProfilePage } from './components/pages/ProfilePage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { PageErrorBoundary } from './components/common/PageErrorBoundary';
 
-import { INITIAL_EVENTS, INITIAL_COMPANIES, INITIAL_ALERTS } from './data/mockData';
-import { GlobalEvent, CompanyRisk, AlertItem } from './types';
+import { INITIAL_EVENTS, INITIAL_COMPANIES } from './data/mockData';
+import { GlobalEvent, CompanyRisk } from './types';
 import { useLiveHeadlines, NEWS_POLL_INTERVAL_MS } from './lib/newsService';
+import { useLiveAlerts, ALERTS_POLL_INTERVAL_MS } from './lib/useLiveAlerts';
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -27,9 +28,16 @@ export function App() {
   const [currentPath, setCurrentPath] = useState<string>('/dashboard');
   const [events, setEvents] = useState<GlobalEvent[]>(INITIAL_EVENTS);
   const [companies, setCompanies] = useState<CompanyRisk[]>(INITIAL_COMPANIES);
-  const [alerts, setAlerts] = useState<AlertItem[]>(INITIAL_ALERTS);
 
   const { liveEvents, feed: newsFeed } = useLiveHeadlines('all', NEWS_POLL_INTERVAL_MS, 25);
+  const {
+    alerts,
+    unreadCount: unreadAlertsCount,
+    loading: alertsLoading,
+    error: alertsError,
+    toggleRead,
+    markAllRead
+  } = useLiveAlerts(ALERTS_POLL_INTERVAL_MS, isAuthenticated);
 
   // Merge live API news with seeded events; live headlines appear first
   useEffect(() => {
@@ -88,8 +96,7 @@ export function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  // Unread alerts count
-  const unreadAlertsCount = alerts.filter((a) => !a.read).length;
+  // Unread alerts count comes from the live feed hook
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0A0E17] text-slate-900 dark:text-slate-100 flex font-sans antialiased selection:bg-blue-600 selection:text-white transition-colors duration-200">
@@ -171,6 +178,11 @@ export function App() {
             <AlertsPage
               onNavigate={navigate}
               userRiskTolerance={userRiskTolerance}
+              alerts={alerts}
+              loading={alertsLoading}
+              error={alertsError}
+              onToggleRead={toggleRead}
+              onMarkAllRead={markAllRead}
             />
           )}
 
@@ -188,7 +200,7 @@ export function App() {
           )}
 
           {baseRoute === '/notifications' && (
-            <NotificationsPage onNavigate={navigate} />
+            <NotificationsPage onNavigate={navigate} alerts={alerts} />
           )}
 
           {baseRoute === '/profile' && (

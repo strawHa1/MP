@@ -9,6 +9,7 @@ import {
   isBlackSwanEvent,
   isHeadlineLive,
   isImpactAligned,
+  interpolateMissingSeries,
   findTrendGaps,
   roundPercentsTo100,
   scoreDeltaFromTrend,
@@ -64,6 +65,7 @@ assert.equal(window.length, 30);
 assert.equal(window[0], '2026-07-22');
 assert.equal(window[window.length - 1], '2026-08-20');
 assert.equal(utcDateKey(new Date('2026-08-20T23:30:00Z')), '2026-08-20');
+assert.equal(utcDateKey(new Date('2026-08-21T03:00:00Z')), '2026-08-20');
 assert.equal(formatChartDay('2026-08-20'), 'Aug 20');
 
 const gapped = [
@@ -106,5 +108,14 @@ assert.equal(floor[0], 0);
 assert.ok(floor[1] >= 25);
 
 assert.deepEqual(trendYAxisDomain([]), [0, 100]);
+
+const filled = interpolateMissingSeries([10, null, null, 40]);
+assert.deepEqual(filled.filled, [10, 20, 30, 40]);
+assert.deepEqual(filled.estimated, [false, true, true, false]);
+
+const lead = interpolateMissingSeries([null, null, 20, 30]);
+assert.equal(lead.filled[2], 20);
+assert.equal(lead.estimated[0], true);
+assert.ok((lead.filled[0] as number) <= 30);
 
 console.log('dashboardMetrics: all checks passed');

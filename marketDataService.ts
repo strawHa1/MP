@@ -3,7 +3,7 @@ import path from 'path';
 import { getCachedQuote, setCachedQuote, CachedQuote } from './quoteCache.js';
 import { getImpactState, refreshImpactData } from './impactService.js';
 import { fetchHeadlines } from './newsApi.js';
-import { recordDailySnapshot } from './dashboardTrendService.js';
+import { getCountryHistory } from './dashboardTrendService.js';
 import { fetchYahooQuote } from './yahooFinance.js';
 
 export interface WatchlistEntry {
@@ -374,7 +374,10 @@ interface CountryRiskHeadline {
   sentiment: 'negative' | 'neutral' | 'positive';
 }
 
-export function computeLiveCountryRisk(liveHeadlines: CountryRiskHeadline[] = []): {
+export function computeLiveCountryRisk(
+  liveHeadlines: CountryRiskHeadline[] = [],
+  options: { includeImpact?: boolean } = {}
+): {
   countries: Array<{
     id: string;
     name: string;
@@ -390,8 +393,9 @@ export function computeLiveCountryRisk(liveHeadlines: CountryRiskHeadline[] = []
   }>;
   lastUpdated: string;
 } {
+  const includeImpact = options.includeImpact !== false;
   const base = getCountriesBase();
-  const impactState = getImpactState();
+  const impactState = includeImpact ? getImpactState() : { impactedCompanies: [] as { headline: string; description: string; severity: string }[] };
   const previousScores = countryRiskCache
     ? Object.fromEntries(countryRiskCache.countries.map((c) => [c.id, c.riskScore]))
     : {};
@@ -479,9 +483,21 @@ let countryRiskCache: ReturnType<typeof computeLiveCountryRisk> | null = null;
 let countryRiskCacheTime = 0;
 const COUNTRY_CACHE_MS = 5 * 60 * 1000;
 
+function withCountryHistory(data: NonNullable<typeof countryRiskCache>) {
+  const history = getCountryHistory(30);
+  const countries = data.countries.map((c) => {
+    const sparkline = history.map((day) => day.scores[c.id] ?? null);
+    const recorded = sparkline.filter((s): s is number => s != null);
+    const monthDelta =
+      recorded.length >= 2 ? recorded[recorded.length - 1] - recorded[0] : null;
+    return { ...c, sparkline, monthDelta };
+  });
+  return { countries, lastUpdated: data.lastUpdated };
+}
+
 export async function getLiveCountryRisk(force = false) {
   if (!force && countryRiskCache && Date.now() - countryRiskCacheTime < COUNTRY_CACHE_MS) {
-    return countryRiskCache;
+    return withCountryHistory(countryRiskCache);
   }
 
   if (force) {
@@ -498,15 +514,7 @@ export async function getLiveCountryRisk(force = false) {
 
   countryRiskCache = computeLiveCountryRisk(headlines);
   countryRiskCacheTime = Date.now();
-  const avgScore =
-    countryRiskCache.countries.length > 0
-      ? Math.round(
-          countryRiskCache.countries.reduce((s, c) => s + c.riskScore, 0) /
-            countryRiskCache.countries.length
-        )
-      : 50;
-  recordDailySnapshot(avgScore);
-  return countryRiskCache;
+  return withCountryHistory(countryRiskCache);
 }
 
 /** @deprecated use getLiveCountryRisk */

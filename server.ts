@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
@@ -15,6 +16,7 @@ import {
   searchWatchlist,
   getCompanyProfile,
   getLiveCountryRisk,
+  computeLiveCountryRisk,
   fetchQuote,
   fetchQuotesBatch
 } from './marketDataService.js';
@@ -22,11 +24,21 @@ import { searchMarketSymbols, refreshSearchQuotes, initSearchUniverse } from './
 import {
   getTrendHistory,
   hasSnapshot,
+  marketDateKey,
+  recordCountryDailySnapshot,
+  setTrendScoreProvider,
+  setCountryHistoryComputer
+} from './dashboardTrendService.js';
+import {
   initDashboardTrendService,
   runDailySnapshotJob,
-  setTrendScoreProvider,
+  snapshotHealthSummary,
   startDashboardTrendCron
-} from './dashboardTrendService.js';
+} from './snapshotJobService.js';
+import {
+  getLiveAlertsPayload,
+  startAlertEngine
+} from './alertEngineService.js';
 import { getDashboardIntelligence } from './dashboardIntelligenceService.js';
 import { getGeminiApiKey, getGeminiKeySource, loadProjectEnv, logGeminiKeyStatus, maskGeminiApiKey, persistGeminiKeyToEnv, sanitizeEnvValue } from './envConfig.js';
 import {
@@ -54,6 +66,25 @@ const PORT = 3002;
 const ENV_FILE_PATH = path.join(process.cwd(), '.env');
 
 app.use(express.json());
+
+function secretsMatch(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function isLoopbackAddress(ip: string | undefined): boolean {
+  if (!ip) return false;
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+function authorizeSnapshotJob(req: express.Request): boolean {
+  const secret = (process.env.SNAPSHOT_JOB_SECRET || '').trim();
+  const provided = String(req.get('x-snapshot-job-secret') || req.query.secret || '');
+  if (secret) return secretsMatch(provided, secret);
+  return isLoopbackAddress(req.ip) || isLoopbackAddress(req.socket.remoteAddress);
+}
 
 // Initialize Gemini AI Client
 const getGenAI = () => createGeminiClient();
@@ -197,7 +228,11 @@ app.get('/api/dashboard/trend', async (req, res) => {
     }
     const trend = getTrendHistory(30);
     res.set('Cache-Control', 'no-store');
-    res.json({ ...trend, lastUpdated: new Date().toISOString() });
+    res.json({
+      ...trend,
+      lastUpdated: new Date().toISOString(),
+      jobHealth: snapshotHealthSummary()
+    });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'Failed to load trend' });
   }
@@ -607,9 +642,26 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// Health check endpoint
+app.post('/api/jobs/daily-snapshot', async (req, res) => {
+  if (!authorizeSnapshotJob(req)) {
+    return res.status(401).json({ error: 'Unauthorized snapshot job trigger' });
+  }
+  try {
+    const job = await runDailySnapshotJob('scheduler');
+    res.status(job.ok ? 200 : 500).json({ ...job, jobHealth: snapshotHealthSummary() });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || 'Snapshot job failed' });
+  }
+});
+
+// Health check endpoint — liveness stays 200; snapshotJob.ok is the job signal
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const snapshotJob = snapshotHealthSummary();
+  res.json({
+    status: snapshotJob.lastAttemptAt && !snapshotJob.ok ? 'degraded' : 'ok',
+    timestamp: new Date().toISOString(),
+    snapshotJob
+  });
 });
 
 /**
@@ -660,7 +712,19 @@ app.get('/api/news/company', async (req, res) => {
  * Stock Impact — news-to-price correlation pipeline
  */
 app.get('/api/impact', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json(getImpactState());
+});
+
+app.get('/api/alerts', async (req, res) => {
+  try {
+    const payload = await getLiveAlertsPayload();
+    res.set('Cache-Control', 'no-store');
+    res.json(payload);
+  } catch (e: any) {
+    console.error('[Alerts] GET /api/alerts failed', e);
+    res.status(500).json({ error: e?.message || 'Failed to load alerts' });
+  }
 });
 
 app.post('/api/impact/refresh', async (req, res) => {
@@ -699,18 +763,36 @@ async function startServer() {
     startImpactCron();
     startImpactPricePolling(30_000);
     initSearchUniverse();
+    setCountryHistoryComputer((headlines) => {
+      const data = computeLiveCountryRisk(
+        headlines.map((h) => ({
+          title: h.title,
+          description: h.description,
+          region: h.region,
+          sentiment: h.sentiment as 'negative' | 'neutral' | 'positive'
+        })),
+        { includeImpact: false }
+      );
+      return data.countries.map((c) => ({ id: c.id, score: c.riskScore }));
+    });
     setTrendScoreProvider(async () => {
       const data = await getLiveCountryRisk(true);
       const countries = data?.countries || [];
       if (countries.length === 0) {
         throw new Error('No country risk scores available for daily snapshot');
       }
+      recordCountryDailySnapshot(
+        countries.map((c: { id: string; riskScore: number }) => ({ id: c.id, score: c.riskScore })),
+        marketDateKey(),
+        'live'
+      );
       return Math.round(
         countries.reduce((s: number, c: { riskScore: number }) => s + c.riskScore, 0) / countries.length
       );
     });
     initDashboardTrendService();
     startDashboardTrendCron();
+    startAlertEngine();
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {

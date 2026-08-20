@@ -1,0 +1,32 @@
+name: Daily risk snapshot
+
+# 16:05 America/New_York is 20:05 UTC (EDT) or 21:05 UTC (EST).
+# Fire both; the server upserts by calendar day so a double hit cannot duplicate a row.
+on:
+  schedule:
+    - cron: '10 20 * * *'
+    - cron: '10 21 * * *'
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Trigger snapshot job
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          SNAPSHOT_JOB_SECRET: ${{ secrets.SNAPSHOT_JOB_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_URL:-}" ] || [ "$APP_URL" = "MY_APP_URL" ]; then
+            echo "APP_URL GitHub secret is not set."
+            echo "Add APP_URL (public server origin) and SNAPSHOT_JOB_SECRET so this workflow can wake the job after deploys."
+            exit 1
+          fi
+          url="${APP_URL%/}/api/jobs/daily-snapshot"
+          echo "POST $url"
+          curl -fsS -X POST "$url" \
+            -H "Content-Type: application/json" \
+            -H "x-snapshot-job-secret: ${SNAPSHOT_JOB_SECRET}" \
+            --retry 3 --retry-delay 30 --max-time 1200

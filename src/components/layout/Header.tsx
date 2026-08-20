@@ -16,7 +16,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   alerts = [],
-  unreadCount = 2
+  unreadCount = 0
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 

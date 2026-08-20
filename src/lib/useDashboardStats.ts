@@ -15,6 +15,7 @@ import {
 export interface TrendPoint {
   day: string;
   score: number | null;
+  recordedScore?: number | null;
   date?: string;
   source?: string;
 }
@@ -37,7 +38,18 @@ export interface DashboardStats {
   trend: TrendPoint[];
   trendHigh: number;
   trendSnapshotCount: number;
+  trendEstimatedCount: number;
+  snapshotJob: {
+    ok: boolean;
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastSuccessDate: string | null;
+    lastError: string | null;
+    unrecoverableDays: string[];
+    todayHasSnapshot: boolean;
+  } | null;
   topCountries: LiveCountryRisk[];
+  mapCountries: LiveCountryRisk[];
   trackedCountryCount: number;
   lastUpdated: string | null;
   dataFresh: boolean;
@@ -117,11 +129,17 @@ export function useDashboardStats(events: GlobalEvent[], alerts: AlertItem[]) {
           : 50;
 
       const trend: TrendPoint[] = trendData.points || [];
-      const recordedScores = trend
+      const recordedTrend = trend.map((t) => ({
+        score:
+          t.source === 'live' || t.source === 'headline-backfill'
+            ? t.score
+            : t.recordedScore ?? null
+      }));
+      const recordedScores = recordedTrend
         .map((t) => t.score)
         .filter((s): s is number => s != null && Number.isFinite(s));
       const trendHigh = recordedScores.length > 0 ? Math.max(...recordedScores) : globalRiskScore;
-      const scoreDelta = scoreDeltaFromTrend(globalRiskScore, trend);
+      const scoreDelta = scoreDeltaFromTrend(globalRiskScore, recordedTrend);
 
       const blackSwans = liveEvents.filter(isBlackSwanEvent);
       const liveEventsToday = liveEvents.filter((e) => e.isLive).length;
@@ -179,7 +197,10 @@ export function useDashboardStats(events: GlobalEvent[], alerts: AlertItem[]) {
         trend,
         trendHigh,
         trendSnapshotCount: trendData.recordedCount ?? recordedScores.length,
+        trendEstimatedCount: trendData.estimatedCount ?? 0,
+        snapshotJob: trendData.jobHealth ?? null,
         topCountries,
+        mapCountries: countries,
         trackedCountryCount: countries.length,
         lastUpdated,
         dataFresh: isDataFresh(lastUpdated),

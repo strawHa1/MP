@@ -93,7 +93,7 @@ function parseRssItems(xml: string, region: 'india' | 'world', defaultSource: st
   const itemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let match: RegExpExecArray | null;
 
-  while ((match = itemRegex.exec(xml)) !== null && articles.length < 25) {
+  while ((match = itemRegex.exec(xml)) !== null && articles.length < 80) {
     const block = match[1];
     const title = stripHtml((block.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').trim());
     const link = (block.match(/<link[^>]*>([\s\S]*?)<\/link>/i)?.[1] || '').trim();
@@ -277,39 +277,63 @@ export async function fetchHeadlines(region: NewsRegion = 'all', limit = 20): Pr
 
   if (gnewsKey) {
     try {
-      articles = await fetchFromGNews(region, limit, gnewsKey);
-      if (articles.length > 0) source = 'gnews';
+      const gnews = await fetchFromGNews(region, Math.min(limit, 50), gnewsKey);
+      if (gnews.length > 0) {
+        articles = articles.concat(gnews);
+        source = 'gnews';
+      }
     } catch (e) {
       console.warn('GNews fetch failed:', e);
     }
   }
 
-  if (articles.length === 0 && newsApiKey) {
+  if (newsApiKey) {
     try {
-      articles = await fetchFromNewsApi(region, limit, newsApiKey);
-      if (articles.length > 0) source = 'newsapi';
+      const newsApi = await fetchFromNewsApi(region, Math.min(limit, 50), newsApiKey);
+      if (newsApi.length > 0) {
+        articles = articles.concat(newsApi);
+        source = source && source !== 'rss' ? `${source}+newsapi` : 'newsapi';
+      }
     } catch (e) {
       console.warn('NewsAPI fetch failed:', e);
     }
   }
 
-  if (articles.length === 0 && finnhubKey) {
+  if (finnhubKey) {
     try {
-      articles = await fetchFromFinnhubGeneral(limit, finnhubKey);
-      if (articles.length > 0) source = 'finnhub';
+      const finnhub = await fetchFromFinnhubGeneral(Math.min(limit, 50), finnhubKey);
+      if (finnhub.length > 0) {
+        articles = articles.concat(finnhub);
+        source = source ? `${source}+finnhub` : 'finnhub';
+      }
     } catch (e) {
       console.warn('Finnhub news fetch failed:', e);
     }
   }
 
-  if (articles.length === 0) {
-    articles = await fetchFromRss(region, limit);
-    source = 'rss';
+  try {
+    const rss = await fetchFromRss(region, Math.max(limit, 80));
+    if (rss.length > 0) {
+      articles = articles.concat(rss);
+      if (!source || source === 'rss' && articles.length === rss.length) source = 'rss';
+      else if (source !== 'rss') source = `${source}+rss`;
+    } else if (articles.length === 0) {
+      source = 'offline';
+    }
+  } catch (e) {
+    console.warn('RSS fetch failed:', e);
   }
+
+  const seen = new Set<string>();
+  articles = articles.filter((a) => {
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
 
   articles = articles
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
-    .slice(0, limit);
+    .slice(0, Math.min(200, Math.max(limit, articles.length)));
 
   cache[cacheKey] = { data: articles, timestamp: Date.now(), source };
   return { articles, source };

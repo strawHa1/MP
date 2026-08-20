@@ -286,3 +286,66 @@ export function trendYAxisDomain(scores: number[]): [number, number] {
   if (lo >= hi) return [0, 100];
   return [lo, hi];
 }
+
+/** Honest relative timestamp from a real ISO createdAt (never invents a time). */
+export function formatRelativeTime(iso: string, now = Date.now()): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const mins = Math.max(0, Math.floor((now - t) / 60000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hr${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * Fill nulls by linear interpolation between nearest known values.
+ * Leading nulls slope from the median of known values toward the first known point
+ * so the start of a window is not a flat copy of day one.
+ */
+export function interpolateMissingSeries(values: (number | null)[]): {
+  filled: (number | null)[];
+  estimated: boolean[];
+} {
+  const n = values.length;
+  const estimated = values.map((v) => v == null);
+  const filled: (number | null)[] = values.slice();
+  const known: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (values[i] != null && Number.isFinite(values[i] as number)) known.push(i);
+  }
+  if (known.length === 0) return { filled, estimated };
+
+  const knownVals = known.map((i) => values[i] as number).sort((a, b) => a - b);
+  const median = knownVals[Math.floor(knownVals.length / 2)];
+
+  for (let i = 0; i < n; i++) {
+    if (values[i] != null && Number.isFinite(values[i] as number)) continue;
+    let left = -1;
+    for (let j = i - 1; j >= 0; j--) {
+      if (values[j] != null && Number.isFinite(values[j] as number)) {
+        left = j;
+        break;
+      }
+    }
+    let right = -1;
+    for (let j = i + 1; j < n; j++) {
+      if (values[j] != null && Number.isFinite(values[j] as number)) {
+        right = j;
+        break;
+      }
+    }
+    if (left >= 0 && right >= 0) {
+      const t = (i - left) / (right - left);
+      filled[i] = Math.round((values[left] as number) + t * ((values[right] as number) - (values[left] as number)));
+    } else if (right >= 0) {
+      const t = right === 0 ? 1 : i / right;
+      filled[i] = Math.round(median + t * ((values[right] as number) - median));
+    } else if (left >= 0) {
+      filled[i] = values[left];
+    }
+  }
+  return { filled, estimated };
+}
